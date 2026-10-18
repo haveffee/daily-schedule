@@ -117,6 +117,12 @@
     .goal-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.75); }
     .goal-row strong { display: block; font-size: 14px; }
     .goal-row span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .goal-progress { margin-top: 10px; }
+    .goal-progress-label { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; color: var(--muted); font-size: 11px; }
+    .goal-progress-label span { display: inline; margin: 0; color: var(--muted); font-size: 11px; }
+    .goal-progress-label strong { color: #7752a8; font-size: 12px; }
+    .goal-progress-track { height: 8px; overflow: hidden; border-radius: 999px; background: rgba(119,82,168,.13); }
+    .goal-progress-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #9a73c5, #7752a8); transition: width .25s ease; }
     .goal-remove { min-height: 34px; padding: 0 10px; background: #f2f2f7; color: #c0392b; font-size: 12px; }
     .ai-privacy { margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
     .goal-plan-controls { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-top: 17px; }
@@ -267,7 +273,7 @@
         <span class="goal-period">Октябрь 2026</span>
       </div>
       <h2 id="goals-title">Цели на месяц</h2>
-      <p class="panel-intro">Добавь до трёх конкретных целей на этот месяц. Qwen предложит поэтапный план и поставит занятия в свободные окна, сохраняя работу, репетиторов и отдых. Войди через Google, чтобы видеть те же цели на телефоне и компьютере.</p>
+      <p class="panel-intro">Добавь до трёх конкретных целей на этот месяц — навык, проект, учебу, здоровье или любое другое направление. Qwen предложит последовательные действия и поставит их в свободные окна, сохраняя работу, репетиторов и отдых. Войди через Google на обоих устройствах, чтобы синхронизировать цели, план и отметки.</p>
       <form class="goal-form" id="goalForm">
         <label>Цель
           <input name="title" maxlength="90" placeholder="Например, научиться видеомонтажу" required>
@@ -286,7 +292,7 @@
       </div>
       <p class="goal-status" id="goalStatus" aria-live="polite">Планировщик готов. Добавь цель и создай план.</p>
       <div class="goal-roadmap" id="goalRoadmap"></div>
-      <p class="ai-privacy">План формирует локальная Qwen-модель: цели не отправляются AI-провайдеру. На совместимом компьютере с WebGPU и 8 ГБ памяти доступна более крупная модель (около 1,43 ГБ); на телефоне используется компактная (около 570 МБ). Для обучающих шагов добавляется ссылка на поиск видеоуроков в YouTube — конкретный ролик ты выберешь сам. При первом построении нужен интернет для загрузки модели с Hugging Face.</p>
+      <p class="ai-privacy">План формирует локальная Qwen-модель: цели не отправляются AI-провайдеру. На совместимом компьютере с WebGPU и 8 ГБ памяти доступна более крупная модель (около 1,43 ГБ); на телефоне используется компактная (около 570 МБ). Для шагов, где полезны материалы, можно открыть поиск YouTube по теме — ролик выбираешь сам. При первом построении нужен интернет для загрузки модели с Hugging Face.</p>
     </section>
     <section class="panel" aria-labelledby="custom-title">
       <p class="section-label">Планировщик</p>
@@ -370,7 +376,7 @@
       <h2 id="focus-title">💡 Фокус дня</h2>
       <p>В конце дня спокойно оцени невыполненные задачи: перенеси важные на конкретное время, а лишние убери из списка.</p>
     </section>
-    <footer>Обновлено 18:10 по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
+    <footer>Обновлено 18:28 по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
   </main>
   <script src="./firebase-config.js?v=fc374-plan1"></script>
   <script>
@@ -892,7 +898,7 @@
     }
 
     function goalResourceUrl(goal, task) {
-      const query = `${goal.title} ${task.title} обучение урок`;
+      const query = `${goal.title} ${task.title}`;
       return "https://www.youtube.com/results?search_query=" + encodeURIComponent(query);
     }
 
@@ -914,7 +920,33 @@
           title.textContent = goal.title;
           const outcome = document.createElement("span");
           outcome.textContent = `${goal.outcome} · ${goal.weeklyMinutes} мин/неделю`;
-          copy.append(title, outcome);
+          const goalTasks = planning.tasks.filter((task) => task.goalId === goal.id);
+          const doneCount = goalTasks.filter((task) => task.done).length;
+          const percent = goalTasks.length ? Math.round(doneCount / goalTasks.length * 100) : 0;
+          const progress = document.createElement("div");
+          progress.className = "goal-progress";
+          progress.setAttribute("role", "progressbar");
+          progress.setAttribute("aria-label", `Прогресс цели «${goal.title}»`);
+          progress.setAttribute("aria-valuemin", "0");
+          progress.setAttribute("aria-valuemax", "100");
+          progress.setAttribute("aria-valuenow", String(percent));
+          const progressLabel = document.createElement("div");
+          progressLabel.className = "goal-progress-label";
+          const progressCaption = document.createElement("span");
+          progressCaption.textContent = goalTasks.length
+            ? `${doneCount} из ${goalTasks.length} шагов выполнено`
+            : "План ещё не составлен";
+          const progressPercent = document.createElement("strong");
+          progressPercent.textContent = `${percent}%`;
+          progressLabel.append(progressCaption, progressPercent);
+          const track = document.createElement("div");
+          track.className = "goal-progress-track";
+          const fill = document.createElement("div");
+          fill.className = "goal-progress-fill";
+          fill.style.width = `${percent}%`;
+          track.append(fill);
+          progress.append(progressLabel, track);
+          copy.append(title, outcome, progress);
           const remove = document.createElement("button");
           remove.className = "goal-remove";
           remove.type = "button";
@@ -991,7 +1023,7 @@
           resource.href = goalResourceUrl(goal, task);
           resource.target = "_blank";
           resource.rel = "noopener noreferrer";
-          resource.textContent = "Найти видеоурок ↗";
+          resource.textContent = "Подобрать видео по теме ↗";
           copy.append(resource);
           const meta = document.createElement("span");
           meta.className = "goal-task-meta";
@@ -1096,10 +1128,10 @@
 
     function fallbackGoalStep(goal, weekNumber, sessionIndex) {
       const stages = [
-        ["Разобраться в основах", "Посмотри вводный материал, выпиши три ключевые идеи и выбери один навык для практики."],
-        ["Потренировать один навык", "Повтори прием из урока на небольшом примере и сохрани результат."],
-        ["Сделать мини-проект", "Примени изученное к части результата, который хочешь получить к концу месяца."],
-        ["Проверить и улучшить", "Сравни результат с целью, исправь одну слабую часть и запиши следующий шаг."],
+        ["Определить отправную точку", "Зафиксируй, что уже сделано и какой конкретный небольшой шаг приблизит к результату «" + goal.outcome + "»."],
+        ["Сделать первый практический шаг", "Выдели время на одно конкретное действие по цели «" + goal.title + "» и сохрани результат."],
+        ["Продвинуть результат", "Выполни следующий небольшой шаг к результату «" + goal.outcome + "»; при необходимости используй подходящий материал или инструмент."],
+        ["Проверить и скорректировать", "Сравни текущий результат с целью «" + goal.outcome + "», отметь прогресс и выбери следующий шаг."],
       ];
       const stage = stages[(weekNumber - 1 + sessionIndex) % stages.length];
       return { title: `${stage[0]}: ${goal.title}`, description: stage[1] };
@@ -1128,11 +1160,11 @@
             dates: week.dates,
             minutesPerSession: Math.round(Number(goal.weeklyMinutes) / 2 / 5) * 5,
           }));
-          const prompt = `На русском спланируй цель на оставшуюся часть месяца. Цель: ${goal.title}. Итог месяца: ${goal.outcome}. Для каждой недели верни ровно два последовательных занятия; каждое занятие должно занимать ${Math.round(Number(goal.weeklyMinutes) / 2 / 5) * 5} минут. Упражнения должны быть конкретными, разные занятия продолжать друг друга и вести к указанному итогу. В ответе дай только JSON: корневой объект, поле weeks — массив; внутри каждой записи поле week с номером недели и поле sessions — массив из двух объектов с короткими полями title и description. Недели, которые нужно заполнить: ${JSON.stringify(monthSchedule)}. Не добавляй разметку, пояснения или Markdown. /no_think`;
+          const prompt = `На русском составь план достижения цели на оставшуюся часть месяца. Тип цели не ограничен: это может быть обучение, язык, проект, творчество, здоровье, организация быта или другое направление. Цель: ${goal.title}. Измеримый результат к концу месяца: ${goal.outcome}. Для каждой недели верни ровно два последовательных и реалистичных действия; каждое занимает ${Math.round(Number(goal.weeklyMinutes) / 2 / 5) * 5} минут. Подбирай действия именно под эту цель: не своди любой запрос к урокам и обучению. Действия должны быть конкретными, измеримыми, постепенно приближать к результату и учитывать доступное время. Если для шага нужны материалы или инструменты, назови подходящий тип материала, но не утверждай, что нашёл конкретную ссылку. В ответе дай только JSON: корневой объект, поле weeks — массив; внутри каждой записи поле week с номером недели и поле sessions — массив из двух объектов с короткими полями title и description. Недели, которые нужно заполнить: ${JSON.stringify(monthSchedule)}. Не добавляй разметку, пояснения или Markdown. /no_think`;
           let stepsByWeek = new Map();
           try {
             const result = await model([
-              { role: "system", content: "Ты — практичный планировщик навыков. Предлагай небольшие измеримые действия, от простого к сложному. Не утверждай, что искал материалы в интернете. Выдавай только валидный JSON по формату пользователя." },
+              { role: "system", content: "Ты — практичный универсальный планировщик целей. Сначала определи тип цели по запросу, затем предложи небольшие измеримые действия, подходящие именно для неё, от простого к сложному. Не подменяй действия уроками, если цель не учебная. Не утверждай, что искал материалы в интернете. Выдавай только валидный JSON по формату пользователя." },
               { role: "user", content: prompt },
             ], { max_new_tokens: 520, do_sample: false });
             stepsByWeek = parseGoalSteps(generatedText(result), weeks);
