@@ -665,7 +665,8 @@ PAGE_TEMPLATE = r"""<!doctype html>
               "auth/invalid-api-key": "Firebase отклонил ключ приложения. Проверь конфигурацию Firebase сайта.",
             };
             const text = messages[error.code]
-              || `Вход через Google не выполнен (${error.code || "неизвестный код"}). Открой сайт в Safari и пришли этот код.`;
+              ? `${messages[error.code]} (код: ${error.code})`
+              : `Вход через Google не выполнен (${error.code || "неизвестный код"}). Открой сайт в Safari и пришли этот код.`;
             setSyncMessage(text, true);
             console.error("Firebase authentication error:", error);
           }
