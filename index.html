@@ -8,6 +8,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Твой план">
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
   <title>Расписание на 18 октября 2026</title>
   <style>
     :root {
@@ -61,6 +63,14 @@
       letter-spacing: .07em; text-transform: uppercase;
     }
     .goal p:last-child { margin: 0; font-size: 16px; line-height: 1.5; }
+    .habit-banner {
+      display: grid; gap: 5px; margin: 0 0 22px; padding: 16px 20px;
+      border: 1px solid rgba(119,82,168,.13); border-radius: 18px;
+      background: linear-gradient(120deg, rgba(119,82,168,.09), rgba(255,255,255,.86));
+    }
+    .habit-banner strong { color: #7752a8; font-size: 14px; }
+    .habit-banner span { color: var(--muted); font-size: 12px; }
+    .habit-banner p { margin: 2px 0 0; font-size: 15px; line-height: 1.45; }
     .panel { background: var(--surface); border-color: rgba(29,29,31,.06); }
     .panel h2, .schedule-heading h2 { margin: 0; font-size: 20px; letter-spacing: -.025em; }
     .panel-intro { margin: 7px 0 17px; color: var(--muted); font-size: 14px; line-height: 1.45; }
@@ -112,6 +122,8 @@
     .task-copy p { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
     .task--personal .task-time { color: var(--green); }
     .task--custom .task-time { color: #8a4baf; }
+    .task--habit { background: linear-gradient(90deg, rgba(0,113,227,.035), transparent 75%); }
+    .task--habit .task-time { color: #7752a8; }
     .task--done { opacity: .58; }
     .task--done h3 { text-decoration: line-through; }
     .waitlist {
@@ -132,7 +144,7 @@
       .topline { margin-bottom: 26px; font-size: 12px; }
       .timezone { padding: 7px 9px; }
       .date { font-size: 16px; }
-      .goal, .panel { padding: 18px; border-radius: 19px; }
+      .goal, .panel, .habit-banner { padding: 18px; border-radius: 19px; }
       .task-form { grid-template-columns: 1fr 1fr; }
       .task-form label:first-child { grid-column: 1 / -1; }
       .task-form button { grid-column: 1 / -1; }
@@ -165,6 +177,11 @@
     <section class="goal" aria-label="Главная цель">
       <p class="goal-label">Цель на ближайшие 8 месяцев</p>
       <p>Подготовка к ЦЭ/ЦТ для поступления в университет. Каждый учебный шаг приближает к цели.</p>
+    </section>
+    <section class="habit-banner" aria-label="Привычка недели">
+      <strong>Небольшой шаг этой недели</strong>
+      <span>Одна полезная привычка · 5 минут в день</span>
+      <p>Пять минут чтения</p>
     </section>
     <section class="panel" aria-labelledby="custom-title">
       <p class="section-label">Планировщик</p>
@@ -208,8 +225,16 @@
         <p>Позавтракай и подготовься к учебе.</p>
       </div>
     </article>
+<article class="task task--habit">
+      <time class="task-time">10:45–10:50</time>
+      <div class="task-icon" aria-hidden="true">📖</div>
+      <div class="task-copy">
+        <h3>Микропривычка недели</h3>
+        <p>Пять минут чтения: Прочитай пару страниц полезной книги без уведомлений.</p>
+      </div>
+    </article>
 <article class="task">
-      <time class="task-time">10:45–12:45</time>
+      <time class="task-time">10:50–12:50</time>
       <div class="task-icon" aria-hidden="true">📚</div>
       <div class="task-copy">
         <h3>Домашние задания репетиторам</h3>
@@ -217,7 +242,7 @@
       </div>
     </article>
 <article class="task">
-      <time class="task-time">12:45–13:30</time>
+      <time class="task-time">12:50–13:30</time>
       <div class="task-icon" aria-hidden="true">🍽️</div>
       <div class="task-copy">
         <h3>Обед и отдых</h3>
@@ -229,13 +254,13 @@
     <section class="waitlist" id="waitlist" hidden aria-live="polite"></section>
     <section class="focus" aria-labelledby="focus-title">
       <h2 id="focus-title">💡 Фокус дня</h2>
-      <p>Попробуй Pomodoro: 25 минут сосредоточенной работы, затем 5 минут отдыха. После четырех циклов сделай длинный перерыв.</p>
+      <p>В конце дня спокойно оцени невыполненные задачи: перенеси важные на конкретное время, а лишние убери из списка.</p>
     </section>
-    <footer>Обновлено 13:15 по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
+    <footer>Обновлено 13:24 по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
   </main>
   <script>
     "use strict";
-    const baseEvents = [{"start": 600, "end": 615, "icon": "☀️", "title": "Подъем", "description": "Спокойное начало выходного дня.", "category": "fixed"}, {"start": 615, "end": 645, "icon": "🥣", "title": "Завтрак", "description": "Позавтракай и подготовься к учебе.", "category": "fixed"}, {"start": 645, "end": 765, "icon": "📚", "title": "Домашние задания репетиторам", "description": "Выдели время на задания по английскому и математике.", "category": "fixed"}, {"start": 765, "end": 810, "icon": "🍽️", "title": "Обед и отдых", "description": "Перерыв перед второй половиной дня.", "category": "fixed"}];
+    const baseEvents = [{"start": 600, "end": 615, "icon": "☀️", "title": "Подъем", "description": "Спокойное начало выходного дня.", "category": "fixed"}, {"start": 615, "end": 645, "icon": "🥣", "title": "Завтрак", "description": "Позавтракай и подготовься к учебе.", "category": "fixed"}, {"start": 645, "end": 650, "icon": "📖", "title": "Микропривычка недели", "description": "Пять минут чтения: Прочитай пару страниц полезной книги без уведомлений.", "category": "habit"}, {"start": 650, "end": 770, "icon": "📚", "title": "Домашние задания репетиторам", "description": "Выдели время на задания по английскому и математике.", "category": "fixed"}, {"start": 770, "end": 810, "icon": "🍽️", "title": "Обед и отдых", "description": "Перерыв перед второй половиной дня.", "category": "fixed"}];
     const dateKey = "2026-10-18";
     const dayStart = 600;
     const flexStart = 810;
@@ -426,6 +451,7 @@
         const classes = [];
         if (item.category === "personal") classes.push("task--personal");
         if (item.category === "custom") classes.push("task--custom");
+        if (item.category === "habit") classes.push("task--habit");
         if (item.done) classes.push("task--done");
         addCard(timeline, item, item.start, item.end, classes.join(" "));
       }
