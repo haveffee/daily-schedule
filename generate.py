@@ -337,6 +337,21 @@ PAGE_TEMPLATE = r"""<!doctype html>
     .task--custom .task-time { color: #8a4baf; }
     .task--habit { background: linear-gradient(90deg, rgba(0,113,227,.035), transparent 75%); }
     .task--habit .task-time { color: #7752a8; }
+    .task--current {
+      position: relative;
+      background: linear-gradient(100deg, rgba(52,199,89,.16), rgba(52,199,89,.055));
+      box-shadow: inset 4px 0 0 #34a853;
+    }
+    .task--current .task-time, .task--current h3 { color: #187a35; }
+    .current-badge {
+      display: inline-flex; align-items: center; gap: 5px; margin: 0 0 6px;
+      color: #187a35; font-size: 10px; font-weight: 750; letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .current-badge::before {
+      width: 7px; height: 7px; border-radius: 50%; background: #34a853; content: "";
+      box-shadow: 0 0 0 3px rgba(52,199,89,.15);
+    }
     .task--done { opacity: .58; }
     .task--done h3 { text-decoration: line-through; }
     .waitlist {
@@ -666,6 +681,9 @@ PAGE_TEMPLATE = r"""<!doctype html>
     function addCard(parent, item, start, end, extraClass) {
       const article = document.createElement("article");
       article.className = "task" + (extraClass ? " " + extraClass : "");
+      article.dataset.start = String(start);
+      article.dataset.end = String(end);
+      if (item.done) article.dataset.done = "true";
       const time = document.createElement("time");
       time.className = "task-time";
       time.textContent = timeLabel(start) + "–" + timeLabel(end);
@@ -675,13 +693,38 @@ PAGE_TEMPLATE = r"""<!doctype html>
       icon.textContent = item.icon;
       const copy = document.createElement("div");
       copy.className = "task-copy";
+      const currentBadge = document.createElement("span");
+      currentBadge.className = "current-badge";
+      currentBadge.textContent = "Сейчас";
+      currentBadge.hidden = true;
       const title = document.createElement("h3");
       title.textContent = item.title;
       const description = document.createElement("p");
       description.textContent = item.description;
-      copy.append(title, description);
+      copy.append(currentBadge, title, description);
       article.append(time, icon, copy);
       parent.append(article);
+    }
+
+    function moscowMinutesNow() {
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+      }).formatToParts(new Date());
+      const hour = Number(parts.find((part) => part.type === "hour").value);
+      const minute = Number(parts.find((part) => part.type === "minute").value);
+      return hour * 60 + minute;
+    }
+
+    function highlightCurrentTask() {
+      const now = moscowMinutesNow();
+      for (const card of timeline.querySelectorAll(".task")) {
+        const current = now >= Number(card.dataset.start) && now < Number(card.dataset.end) &&
+          card.dataset.done !== "true";
+        card.classList.toggle("task--current", current);
+        card.setAttribute("aria-current", current ? "time" : "false");
+        const badge = card.querySelector(".current-badge");
+        if (badge) badge.hidden = !current;
+      }
     }
 
     function findSlot(task, placed) {
@@ -830,6 +873,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
         if (item.done) classes.push("task--done");
         addCard(timeline, item, item.start, item.end, classes.join(" "));
       }
+      highlightCurrentTask();
       renderUserTasks(placed);
       waitlist.replaceChildren();
       if (waiting.length) {
@@ -880,6 +924,10 @@ PAGE_TEMPLATE = r"""<!doctype html>
     });
 
     render();
+    window.setInterval(highlightCurrentTask, 30_000);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) highlightCurrentTask();
+    });
     void connectFirebase();
   </script>
 </body>
