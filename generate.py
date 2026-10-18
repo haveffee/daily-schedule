@@ -1,5 +1,6 @@
-"""Создает адаптивную страницу с расписанием на текущий день в Москве."""
+"""Создает адаптивное расписание на текущий день по московскому времени."""
 
+import json
 from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
@@ -10,8 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 try:
     MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 except ZoneInfoNotFoundError:
-    # У Москвы UTC+3 без сезонного перевода часов. Этот резерв нужен, например,
-    # для Windows, где база часовых поясов может быть не установлена.
+    # Москва круглый год живет в UTC+3; резерв нужен для Windows без tzdata.
     MOSCOW_TZ = timezone(timedelta(hours=3), "Europe/Moscow")
 
 
@@ -40,13 +40,6 @@ MONTHS = (
     "декабря",
 )
 
-TUTOR_LESSONS = {
-    0: ("18:00", "🇬🇧", "Репетитор по английскому", "Занятие по расписанию."),
-    2: ("18:00", "🇬🇧", "Репетитор по английскому", "Занятие по расписанию."),
-    1: ("19:30", "📐", "Репетитор по математике", "Занятие по расписанию."),
-    3: ("20:30", "📐", "Репетитор по математике", "Занятие по расписанию."),
-}
-
 FOCUS_TIPS = (
     "Стабильный режим помогает легче включаться в учебу. Постарайся ложиться и вставать примерно в одно время.",
     "Попробуй Pomodoro: 25 минут сосредоточенной работы, затем 5 минут отдыха. После четырех циклов сделай длинный перерыв.",
@@ -55,243 +48,265 @@ FOCUS_TIPS = (
 )
 
 
-def build_tasks(day_index: int) -> tuple[str, bool]:
-    """Возвращает HTML задач и признак буднего дня."""
+def minutes(time_label: str) -> int:
+    """Преобразует время HH:MM в количество минут от начала суток."""
+    hour, minute = (int(part) for part in time_label.split(":"))
+    return hour * 60 + minute
+
+
+def make_event(
+    start: str,
+    end: str,
+    icon: str,
+    title: str,
+    description: str,
+    category: str = "fixed",
+) -> dict[str, int | str]:
+    return {
+        "start": minutes(start),
+        "end": minutes(end),
+        "icon": icon,
+        "title": title,
+        "description": description,
+        "category": category,
+    }
+
+
+def build_schedule(day_index: int) -> tuple[list[dict[str, int | str]], bool, int, int, int]:
+    """Возвращает фиксированные события, границы дня и начало гибкого времени."""
     is_weekday = day_index < 5
 
-    if is_weekday:
-        tasks = [
-            ("07:20", "☀️", "Подъем", "Начни день без спешки."),
-            ("08:00", "🚏", "Выход к остановке", "Автобус отправляется в 08:06."),
-            ("08:06", "🚌", "Автобус", "Дорога на работу."),
-            ("09:00–17:00", "🛍️", "Работа продавцом", "Рабочий день."),
+    if not is_weekday:
+        events = [
+            make_event("10:00", "10:15", "☀️", "Подъем", "Спокойное начало выходного дня."),
+            make_event("10:15", "10:45", "🥣", "Завтрак", "Позавтракай и подготовься к учебе."),
+            make_event(
+                "10:45",
+                "12:45",
+                "📚",
+                "Домашние задания репетиторам",
+                "Выдели время на задания по английскому и математике.",
+            ),
+            make_event("12:45", "13:30", "🍽️", "Обед и отдых", "Перерыв перед второй половиной дня."),
         ]
+        return events, False, minutes("10:00"), minutes("13:30"), minutes("22:00")
 
-        if day_index in TUTOR_LESSONS:
-            tasks.append(TUTOR_LESSONS[day_index])
+    events = [
+        make_event("07:20", "07:30", "☀️", "Подъем", "Начни день без спешки."),
+        make_event("07:30", "07:45", "🥣", "Завтрак", "Завтрак перед дорогой."),
+        make_event("07:45", "08:00", "🎒", "Сборы", "Подготовься к выходу."),
+        make_event("08:00", "08:06", "🚶", "Дорога до остановки", "Выйди к автобусу заранее."),
+        make_event("08:06", "09:00", "🚌", "Автобус и дорога", "Автобус отправляется в 08:06."),
+        make_event("09:00", "17:00", "🛍️", "Работа продавцом", "Рабочий день."),
+        make_event("17:00", "17:30", "🚶", "Дорога домой и пауза", "Переключись после работы."),
+    ]
 
-        tasks.extend(
+    if day_index in (0, 2):
+        events.extend(
             [
-                (
-                    "Вечером",
-                    "🏃",
-                    "Физическая активность",
-                    "Один час движения: тренировка, прогулка или другой подходящий вариант.",
-                ),
-                (
-                    "После активности",
-                    "🎬",
-                    "Личная карьера",
-                    "Видеомонтаж, стримы и работа над трейд-ботом.",
-                ),
+                make_event("18:00", "19:00", "🇬🇧", "Английский с репетитором", "Продолжительность заложена как 60 минут."),
+                make_event("19:00", "19:15", "🧘", "Переход к тренировке", "Небольшая пауза и подготовка."),
+                make_event("19:15", "20:15", "🏃", "Физическая активность", "Один час тренировки, прогулки или движения."),
+                make_event("20:15", "20:45", "🍽️", "Ужин и отдых", "Восстановись после рабочего дня."),
+            ]
+        )
+    elif day_index == 1:
+        events.extend(
+            [
+                make_event("17:30", "18:30", "🏃", "Физическая активность", "Один час тренировки, прогулки или движения."),
+                make_event("18:30", "19:15", "🍽️", "Ужин", "Перерыв перед занятием."),
+                make_event("19:15", "19:30", "📐", "Подготовка к занятию", "Подготовь материалы по математике."),
+                make_event("19:30", "20:30", "📐", "Математика с репетитором", "Продолжительность заложена как 60 минут."),
+                make_event("20:30", "20:45", "🧘", "Пауза после занятия", "Небольшой отдых."),
+            ]
+        )
+    elif day_index == 3:
+        events.extend(
+            [
+                make_event("17:30", "18:30", "🏃", "Физическая активность", "Один час тренировки, прогулки или движения."),
+                make_event("18:30", "19:00", "🍽️", "Ужин", "Перерыв после тренировки."),
+                make_event("20:20", "20:30", "📐", "Подготовка к занятию", "Подготовь материалы по математике."),
+                make_event("20:30", "21:30", "📐", "Математика с репетитором", "Продолжительность заложена как 60 минут."),
+                make_event("21:30", "21:45", "🧘", "Пауза после занятия", "Небольшой отдых."),
             ]
         )
     else:
-        tasks = [
-            ("10:00", "☀️", "Подъем", "Спокойное начало выходного дня."),
-            (
-                "Первая половина дня",
-                "📚",
-                "Домашние задания репетиторам",
-                "Закрой задания по английскому и математике.",
-            ),
-            (
-                "Днем",
-                "🎬",
-                "Личная карьера",
-                "Видеомонтаж, стримы и работа над трейд-ботом.",
-            ),
-        ]
+        events.extend(
+            [
+                make_event("17:30", "18:30", "🏃", "Физическая активность", "Один час тренировки, прогулки или движения."),
+                make_event("18:30", "19:00", "🍽️", "Ужин и отдых", "Восстановись после тренировки."),
+            ]
+        )
 
-    task_cards = "\n".join(
-        f"""<article class="task">
-          <div class="task-time">{escape(time_label)}</div>
-          <div class="task-icon" aria-hidden="true">{escape(icon)}</div>
-          <div class="task-copy">
-            <h3>{escape(title)}</h3>
-            <p>{escape(description)}</p>
-          </div>
-        </article>"""
-        for time_label, icon, title, description in tasks
-    )
-
-    return task_cards, is_weekday
+    return events, True, minutes("07:20"), minutes("17:30"), minutes("22:30")
 
 
-def main() -> None:
-    now = datetime.now(MOSCOW_TZ)
-    weekday = WEEKDAYS[now.weekday()]
-    date_label = f"{now.day} {MONTHS[now.month - 1]} {now.year}"
-    task_cards, is_weekday = build_tasks(now.weekday())
-    day_type = "Будний день" if is_weekday else "Выходной день"
-    focus_tip = escape(choice(FOCUS_TIPS))
+def render_static_event(event: dict[str, int | str]) -> str:
+    """HTML-версия базового расписания для отображения до запуска JavaScript."""
+    start = int(event["start"])
+    end = int(event["end"])
+    time_label = f"{start // 60:02d}:{start % 60:02d}–{end // 60:02d}:{end % 60:02d}"
+    return f"""<article class="task">
+      <time class="task-time">{escape(time_label)}</time>
+      <div class="task-icon" aria-hidden="true">{escape(str(event["icon"]))}</div>
+      <div class="task-copy">
+        <h3>{escape(str(event["title"]))}</h3>
+        <p>{escape(str(event["description"]))}</p>
+      </div>
+    </article>"""
 
-    page = f"""<!doctype html>
+
+PAGE_TEMPLATE = r"""<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f5f5f7">
   <meta name="description" content="Персональное расписание на сегодня по московскому времени.">
-  <title>Расписание на {escape(date_label)}</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Твой план">
+  <title>Расписание на __DATE__</title>
   <style>
-    :root {{
+    :root {
       color-scheme: light;
       --ink: #1d1d1f;
       --muted: #6e6e73;
       --blue: #0071e3;
       --line: rgba(29, 29, 31, .08);
-      --surface: rgba(255, 255, 255, .86);
-    }}
-
-    * {{ box-sizing: border-box; }}
-
-    body {{
+      --surface: rgba(255, 255, 255, .88);
+      --green: #248a3d;
+    }
+    * { box-sizing: border-box; }
+    body {
       margin: 0;
       min-height: 100vh;
-      padding: 36px 20px 48px;
+      padding: 30px 18px 48px;
       background:
-        radial-gradient(ellipse at 50% -20%, rgba(0, 113, 227, .12), transparent 54%),
+        radial-gradient(ellipse at 50% -20%, rgba(0, 113, 227, .13), transparent 55%),
         #f5f5f7;
       color: var(--ink);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       -webkit-font-smoothing: antialiased;
-    }}
-
-    main {{ width: min(100%, 760px); margin: 0 auto; }}
-
-    .topline {{
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 30px;
-      color: var(--muted);
-      font-size: 13px;
-      letter-spacing: .01em;
-    }}
-
-    .brand {{ color: var(--ink); font-weight: 650; }}
-
-    .timezone {{
-      padding: 8px 12px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: rgba(255, 255, 255, .6);
-      white-space: nowrap;
-    }}
-
-    .hero {{ margin: 0 0 26px; text-align: center; }}
-
-    .eyebrow {{
-      margin: 0 0 10px;
-      color: var(--blue);
-      font-size: 13px;
-      font-weight: 650;
-      letter-spacing: .04em;
-      text-transform: uppercase;
-    }}
-
-    h1 {{
-      margin: 0;
-      font-size: clamp(38px, 8vw, 60px);
-      font-weight: 700;
-      letter-spacing: -.055em;
-      line-height: 1.04;
-    }}
-
-    .date {{ margin: 12px 0 0; color: var(--muted); font-size: 18px; }}
-
-    .goal {{
-      margin: 28px 0;
-      padding: 21px 24px;
-      border: 1px solid rgba(0, 113, 227, .10);
-      border-radius: 22px;
-      background: linear-gradient(135deg, rgba(0, 113, 227, .09), rgba(255, 255, 255, .85) 70%);
+    }
+    main { width: min(100%, 780px); margin: 0 auto; }
+    .topline {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; margin-bottom: 30px; color: var(--muted); font-size: 13px;
+    }
+    .brand { color: var(--ink); font-weight: 700; }
+    .timezone {
+      padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px;
+      background: rgba(255, 255, 255, .65); white-space: nowrap;
+    }
+    .hero { margin: 0 0 24px; text-align: center; }
+    .eyebrow {
+      margin: 0 0 10px; color: var(--blue); font-size: 13px; font-weight: 700;
+      letter-spacing: .04em; text-transform: uppercase;
+    }
+    h1 {
+      margin: 0; font-size: clamp(38px, 8vw, 60px); font-weight: 720;
+      letter-spacing: -.055em; line-height: 1.04;
+    }
+    .date { margin: 12px 0 0; color: var(--muted); font-size: 18px; }
+    .goal, .panel {
+      margin: 22px 0; padding: 21px 24px; border: 1px solid rgba(0, 113, 227, .10);
+      border-radius: 22px; background: linear-gradient(135deg, rgba(0, 113, 227, .09), rgba(255,255,255,.9) 70%);
       box-shadow: 0 12px 36px rgba(31, 65, 110, .06);
-    }}
-
-    .goal-label {{
-      margin: 0 0 6px;
-      color: var(--blue);
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: .07em;
-      text-transform: uppercase;
-    }}
-
-    .goal p:last-child {{ margin: 0; font-size: 16px; line-height: 1.5; }}
-
-    .schedule {{
-      overflow: hidden;
-      border: 1px solid rgba(29, 29, 31, .06);
-      border-radius: 26px;
-      background: var(--surface);
-      box-shadow: 0 18px 55px rgba(31, 35, 41, .08);
+    }
+    .goal-label, .section-label {
+      margin: 0 0 7px; color: var(--blue); font-size: 12px; font-weight: 750;
+      letter-spacing: .07em; text-transform: uppercase;
+    }
+    .goal p:last-child { margin: 0; font-size: 16px; line-height: 1.5; }
+    .panel { background: var(--surface); border-color: rgba(29,29,31,.06); }
+    .panel h2, .schedule-heading h2 { margin: 0; font-size: 20px; letter-spacing: -.025em; }
+    .panel-intro { margin: 7px 0 17px; color: var(--muted); font-size: 14px; line-height: 1.45; }
+    .task-form { display: grid; grid-template-columns: minmax(0, 1fr) 135px 145px auto; align-items: end; gap: 10px; }
+    label { display: grid; gap: 7px; color: #424245; font-size: 12px; font-weight: 650; }
+    input {
+      width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #d2d2d7;
+      border-radius: 12px; background: #fff; color: var(--ink); font: inherit; font-size: 14px;
+    }
+    input:focus { outline: 3px solid rgba(0,113,227,.17); border-color: var(--blue); }
+    button {
+      min-height: 44px; padding: 0 16px; border: 0; border-radius: 12px;
+      background: var(--blue); color: #fff; font: inherit; font-size: 14px;
+      font-weight: 650; cursor: pointer; transition: transform .15s, opacity .15s;
+    }
+    button:hover { opacity: .9; } button:active { transform: scale(.98); }
+    button:focus-visible, input:focus-visible { outline: 3px solid rgba(0,113,227,.24); outline-offset: 2px; }
+    .storage-note, .message { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .message { min-height: 17px; color: var(--green); }
+    .my-tasks { margin-top: 12px; padding: 0; list-style: none; }
+    .my-task {
+      display: grid; grid-template-columns: 22px minmax(0,1fr) auto; align-items: center;
+      gap: 9px; padding: 11px 0; border-top: 1px solid var(--line);
+    }
+    .my-task input { width: 18px; min-height: 18px; height: 18px; accent-color: var(--blue); }
+    .my-task-copy { min-width: 0; }
+    .my-task-title { display: block; overflow-wrap: anywhere; font-size: 14px; font-weight: 600; }
+    .my-task-meta { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .my-task.done .my-task-title { color: var(--muted); text-decoration: line-through; }
+    .remove-task { min-height: 34px; padding: 0 10px; background: #f2f2f7; color: #c0392b; font-size: 12px; }
+    .empty-tasks { color: var(--muted); font-size: 13px; }
+    .schedule {
+      overflow: hidden; border: 1px solid rgba(29,29,31,.06); border-radius: 26px;
+      background: var(--surface); box-shadow: 0 18px 55px rgba(31,35,41,.08);
       backdrop-filter: blur(18px);
-    }}
-
-    .schedule-heading {{
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 16px;
+    }
+    .schedule-heading {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
       padding: 22px 26px 16px;
-    }}
-
-    .schedule-heading h2 {{ margin: 0; font-size: 20px; letter-spacing: -.025em; }}
-    .schedule-heading span {{ color: var(--muted); font-size: 13px; }}
-
-    .task {{
-      display: grid;
-      grid-template-columns: 132px 40px minmax(0, 1fr);
-      align-items: start;
-      gap: 14px;
-      padding: 18px 26px;
-      border-top: 1px solid var(--line);
-    }}
-
-    .task-time {{
-      padding-top: 2px;
-      color: var(--blue);
-      font-size: 14px;
-      font-weight: 650;
-      line-height: 1.45;
-    }}
-
-    .task-icon {{ font-size: 23px; line-height: 1.1; }}
-    .task-copy h3 {{ margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.015em; }}
-    .task-copy p {{ margin: 5px 0 0; color: var(--muted); font-size: 14px; line-height: 1.45; }}
-
-    .focus {{
-      margin-top: 24px;
-      padding: 23px 25px;
-      border-radius: 23px;
-      background: #1d1d1f;
-      color: #fff;
-      box-shadow: 0 16px 38px rgba(29, 29, 31, .15);
-    }}
-
-    .focus h2 {{ margin: 0 0 9px; font-size: 18px; letter-spacing: -.02em; }}
-    .focus p {{ margin: 0; color: rgba(255, 255, 255, .78); font-size: 15px; line-height: 1.55; }}
-
-    footer {{ margin-top: 22px; color: #8a8a8e; text-align: center; font-size: 12px; }}
-
-    @media (max-width: 520px) {{
-      body {{ padding: 22px 14px 32px; }}
-      .topline {{ margin-bottom: 28px; font-size: 12px; }}
-      .timezone {{ padding: 7px 9px; }}
-      .date {{ font-size: 16px; }}
-      .goal {{ margin: 23px 0; padding: 18px 19px; border-radius: 19px; }}
-      .schedule {{ border-radius: 22px; }}
-      .schedule-heading {{ padding: 20px 18px 14px; }}
-      .task {{ grid-template-columns: 74px 28px minmax(0, 1fr); gap: 9px; padding: 16px 17px; }}
-      .task-time {{ font-size: 12px; }}
-      .task-icon {{ font-size: 20px; }}
-      .task-copy h3 {{ font-size: 15px; }}
-      .task-copy p {{ font-size: 13px; }}
-      .focus {{ padding: 20px; border-radius: 20px; }}
-    }}
+    }
+    .schedule-heading span { color: var(--muted); font-size: 13px; }
+    .task {
+      display: grid; grid-template-columns: 112px 38px minmax(0,1fr); align-items: start;
+      gap: 13px; padding: 17px 26px; border-top: 1px solid var(--line);
+    }
+    .task-time { padding-top: 2px; color: var(--blue); font-size: 14px; font-weight: 700; line-height: 1.45; white-space: nowrap; }
+    .task-icon { font-size: 22px; line-height: 1.1; }
+    .task-copy h3 { margin: 0; font-size: 15px; font-weight: 680; letter-spacing: -.015em; }
+    .task-copy p { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .task--personal .task-time { color: var(--green); }
+    .task--custom .task-time { color: #8a4baf; }
+    .task--done { opacity: .58; }
+    .task--done h3 { text-decoration: line-through; }
+    .waitlist {
+      margin: 14px 0 0; padding: 15px 18px; border: 1px solid #f1d19a;
+      border-radius: 16px; background: #fff9ed; color: #624819; font-size: 13px;
+    }
+    .waitlist h3 { margin: 0 0 8px; font-size: 14px; }
+    .waitlist ul { margin: 0; padding-left: 19px; }
+    .focus {
+      margin-top: 24px; padding: 23px 25px; border-radius: 23px; background: #1d1d1f;
+      color: #fff; box-shadow: 0 16px 38px rgba(29,29,31,.15);
+    }
+    .focus h2 { margin: 0 0 9px; font-size: 18px; letter-spacing: -.02em; }
+    .focus p { margin: 0; color: rgba(255,255,255,.78); font-size: 15px; line-height: 1.55; }
+    footer { margin-top: 22px; color: #8a8a8e; text-align: center; font-size: 12px; }
+    @media (max-width: 620px) {
+      body { padding: 21px 13px 32px; }
+      .topline { margin-bottom: 26px; font-size: 12px; }
+      .timezone { padding: 7px 9px; }
+      .date { font-size: 16px; }
+      .goal, .panel { padding: 18px; border-radius: 19px; }
+      .task-form { grid-template-columns: 1fr 1fr; }
+      .task-form label:first-child { grid-column: 1 / -1; }
+      .task-form button { grid-column: 1 / -1; }
+      .schedule { border-radius: 22px; }
+      .schedule-heading { padding: 20px 17px 14px; }
+      .task { grid-template-columns: 78px 27px minmax(0,1fr); gap: 8px; padding: 15px 13px; }
+      .task-time { font-size: 11px; }
+      .task-icon { font-size: 19px; }
+      .task-copy h3 { font-size: 14px; }
+      .task-copy p { font-size: 12px; }
+      .focus { padding: 20px; border-radius: 20px; }
+    }
+    @media (max-width: 360px) {
+      .task { grid-template-columns: 69px 23px minmax(0,1fr); gap: 6px; padding-right: 10px; padding-left: 10px; }
+      .task-time { font-size: 10px; }
+    }
   </style>
 </head>
 <body>
@@ -300,36 +315,308 @@ def main() -> None:
       <span class="brand">Твой план</span>
       <span class="timezone">Москва · UTC+3</span>
     </div>
-
     <header class="hero">
-      <p class="eyebrow">{escape(day_type)}</p>
+      <p class="eyebrow">__DAY_TYPE__</p>
       <h1>План на сегодня</h1>
-      <p class="date">{escape(weekday.capitalize())}, {escape(date_label)}</p>
+      <p class="date">__WEEKDAY__, __DATE__</p>
     </header>
-
     <section class="goal" aria-label="Главная цель">
       <p class="goal-label">Цель на ближайшие 8 месяцев</p>
       <p>Подготовка к ЦЭ/ЦТ для поступления в университет. Каждый учебный шаг приближает к цели.</p>
     </section>
-
+    <section class="panel" aria-labelledby="custom-title">
+      <p class="section-label">Планировщик</p>
+      <h2 id="custom-title">Добавить дело на сегодня</h2>
+      <p class="panel-intro">Укажи название и длительность. Задача встанет в свободное окно, не перекрывая работу, репетитора и другие фиксированные блоки.</p>
+      <form class="task-form" id="taskForm">
+        <label>Дело
+          <input name="title" maxlength="100" placeholder="Например, разобрать конспект" required>
+        </label>
+        <label>Длительность, мин
+          <input name="duration" type="number" min="5" max="480" step="5" value="30" required>
+        </label>
+        <label>Начать после
+          <input name="time" type="time" aria-label="Желаемое время начала">
+        </label>
+        <button type="submit">Добавить дело</button>
+      </form>
+      <p class="storage-note">Без времени дело поставится в ближайшее свободное окно. Если окно занято — поиск продолжится позже. Дела и отметки хранятся в этом браузере на этом устройстве и не синхронизируются между устройствами.</p>
+      <p class="message" id="message" aria-live="polite"></p>
+      <ul class="my-tasks" id="myTasks"></ul>
+    </section>
     <section class="schedule" aria-labelledby="schedule-title">
       <div class="schedule-heading">
         <h2 id="schedule-title">Расписание дня</h2>
-        <span>На сегодня</span>
+        <span>Время с точностью до минуты</span>
       </div>
-      {task_cards}
+      <div id="timeline">
+        __STATIC_TASKS__
+      </div>
     </section>
-
+    <section class="waitlist" id="waitlist" hidden aria-live="polite"></section>
     <section class="focus" aria-labelledby="focus-title">
       <h2 id="focus-title">💡 Фокус дня</h2>
-      <p>{focus_tip}</p>
+      <p>__FOCUS_TIP__</p>
     </section>
-
-    <footer>Обновлено {now:%H:%M} по московскому времени</footer>
+    <footer>Обновлено __UPDATED__ по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
   </main>
+  <script>
+    "use strict";
+    const baseEvents = __EVENTS_JSON__;
+    const dateKey = "__DATE_ISO__";
+    const dayStart = __DAY_START__;
+    const flexStart = __FLEX_START__;
+    const dayEnd = __DAY_END__;
+    const storageKey = "daily-schedule-" + dateKey;
+    const timeline = document.getElementById("timeline");
+    const taskList = document.getElementById("myTasks");
+    const message = document.getElementById("message");
+    const waitlist = document.getElementById("waitlist");
+    const form = document.getElementById("taskForm");
+
+    function readTasks() {
+      try {
+        const saved = localStorage.getItem(storageKey);
+        const parsed = saved ? JSON.parse(saved) : [];
+        return Array.isArray(parsed) ? parsed.filter((task) =>
+          task && typeof task.id === "string" && typeof task.title === "string"
+        ) : [];
+      } catch (error) {
+        message.textContent = "Не удалось прочитать сохраненные дела в этом браузере.";
+        return [];
+      }
+    }
+
+    let userTasks = readTasks();
+
+    function saveTasks() {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(userTasks));
+        return true;
+      } catch (error) {
+        message.textContent = "Браузер не разрешил сохранить дела. Проверь настройки приватности.";
+        return false;
+      }
+    }
+
+    function timeLabel(value) {
+      const hour = Math.floor(value / 60).toString().padStart(2, "0");
+      const minute = (value % 60).toString().padStart(2, "0");
+      return hour + ":" + minute;
+    }
+
+    function addCard(parent, item, start, end, extraClass) {
+      const article = document.createElement("article");
+      article.className = "task" + (extraClass ? " " + extraClass : "");
+      const time = document.createElement("time");
+      time.className = "task-time";
+      time.textContent = timeLabel(start) + "–" + timeLabel(end);
+      const icon = document.createElement("div");
+      icon.className = "task-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.textContent = item.icon;
+      const copy = document.createElement("div");
+      copy.className = "task-copy";
+      const title = document.createElement("h3");
+      title.textContent = item.title;
+      const description = document.createElement("p");
+      description.textContent = item.description;
+      copy.append(title, description);
+      article.append(time, icon, copy);
+      parent.append(article);
+    }
+
+    function findSlot(task, placed) {
+      const preferred = task.time ? Number(task.time.slice(0, 2)) * 60 + Number(task.time.slice(3, 5)) : flexStart;
+      let cursor = Math.max(flexStart, preferred);
+      const blockers = baseEvents.concat(placed).slice().sort((a, b) => a.start - b.start);
+      for (const blocker of blockers) {
+        if (blocker.end <= cursor) continue;
+        if (blocker.start >= dayEnd) break;
+        if (cursor + task.duration <= blocker.start) {
+          return cursor + task.duration <= dayEnd ? cursor : null;
+        }
+        if (cursor < blocker.end && cursor + task.duration > blocker.start) {
+          cursor = blocker.end;
+          if (cursor + task.duration > dayEnd) return null;
+        }
+      }
+      return cursor + task.duration <= dayEnd ? cursor : null;
+    }
+
+    function renderUserTasks(assignments) {
+      taskList.replaceChildren();
+      if (userTasks.length === 0) {
+        const empty = document.createElement("li");
+        empty.className = "empty-tasks";
+        empty.textContent = "Пока нет дополнительных дел.";
+        taskList.append(empty);
+        return;
+      }
+      for (const task of userTasks) {
+        const assignment = assignments.find((item) => item.id === task.id);
+        const row = document.createElement("li");
+        row.className = "my-task" + (task.done ? " done" : "");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = Boolean(task.done);
+        checkbox.setAttribute("aria-label", "Отметить выполненным: " + task.title);
+        checkbox.addEventListener("change", () => {
+          task.done = checkbox.checked;
+          saveTasks();
+          render();
+        });
+        const copy = document.createElement("span");
+        copy.className = "my-task-copy";
+        const title = document.createElement("span");
+        title.className = "my-task-title";
+        title.textContent = task.title;
+        const meta = document.createElement("span");
+        meta.className = "my-task-meta";
+        if (assignment) {
+          meta.textContent = timeLabel(assignment.start) + " · " + task.duration + " мин";
+        } else {
+          meta.textContent = "Не поместилось в оставшееся время · " + task.duration + " мин";
+        }
+        copy.append(title, meta);
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "remove-task";
+        remove.textContent = "Удалить";
+        remove.setAttribute("aria-label", "Удалить дело: " + task.title);
+        remove.addEventListener("click", () => {
+          userTasks = userTasks.filter((item) => item.id !== task.id);
+          saveTasks();
+          message.textContent = "Дело удалено.";
+          render();
+        });
+        row.append(checkbox, copy, remove);
+        taskList.append(row);
+      }
+    }
+
+    function render() {
+      const placed = [];
+      const waiting = [];
+      for (const task of userTasks) {
+        const start = findSlot(task, placed);
+        if (start === null) {
+          waiting.push(task);
+        } else {
+          placed.push({
+            id: task.id,
+            start,
+            end: start + task.duration,
+            icon: "✅",
+            title: task.title,
+            description: "Твое дополнительное дело · " + task.duration + " мин",
+            category: "custom",
+            done: Boolean(task.done),
+          });
+        }
+      }
+      const blocks = baseEvents.concat(placed).slice().sort((a, b) => a.start - b.start);
+      const items = [];
+      let cursor = dayStart;
+      for (const block of blocks) {
+        if (block.start > cursor) {
+          const personalTime = cursor >= flexStart;
+          items.push({
+            start: cursor,
+            end: block.start,
+            icon: personalTime ? "🎬" : "🌿",
+            title: personalTime ? "Личная карьера" : "Свободное время",
+            description: personalTime
+              ? "Видеомонтаж, стримы или работа над трейд-ботом. Выбери один фокус."
+              : "Отдых и личные дела.",
+            category: personalTime ? "personal" : "fixed",
+          });
+        }
+        items.push(block);
+        cursor = Math.max(cursor, block.end);
+      }
+      if (cursor < dayEnd) {
+        const personalTime = cursor >= flexStart;
+        items.push({
+          start: cursor,
+          end: dayEnd,
+          icon: personalTime ? "🎬" : "🌿",
+          title: personalTime ? "Личная карьера" : "Свободное время",
+          description: personalTime
+            ? "Видеомонтаж, стримы или работа над трейд-ботом. Выбери один фокус."
+            : "Отдых и личные дела.",
+          category: personalTime ? "personal" : "fixed",
+        });
+      }
+      timeline.replaceChildren();
+      for (const item of items) {
+        const classes = [];
+        if (item.category === "personal") classes.push("task--personal");
+        if (item.category === "custom") classes.push("task--custom");
+        if (item.done) classes.push("task--done");
+        addCard(timeline, item, item.start, item.end, classes.join(" "));
+      }
+      renderUserTasks(placed);
+      waitlist.replaceChildren();
+      if (waiting.length) {
+        const heading = document.createElement("h3");
+        heading.textContent = "Эти дела пока не поместились в расписание";
+        const list = document.createElement("ul");
+        for (const task of waiting) {
+          const row = document.createElement("li");
+          row.textContent = task.title + " — " + task.duration + " мин. Уменьши длительность или удали другое дело.";
+          list.append(row);
+        }
+        waitlist.append(heading, list);
+        waitlist.hidden = false;
+      } else {
+        waitlist.hidden = true;
+      }
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const title = String(data.get("title") || "").trim();
+      const duration = Number(data.get("duration"));
+      const time = String(data.get("time") || "");
+      if (!title || !Number.isFinite(duration) || duration < 5 || duration > 480) return;
+      userTasks.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+        title,
+        duration,
+        time,
+        done: false,
+      });
+      if (saveTasks()) {
+        message.textContent = "Дело добавлено и расписание пересчитано.";
+        form.reset();
+        form.elements.duration.value = "30";
+        render();
+      }
+    });
+
+    render();
+  </script>
 </body>
 </html>
 """
+
+
+def main() -> None:
+    now = datetime.now(MOSCOW_TZ)
+    day_index = now.weekday()
+    weekday = WEEKDAYS[day_index]
+    date_label = f"{now.day} {MONTHS[now.month - 1]} {now.year}"
+    date_iso = now.date().isoformat()
+    events, is_weekday, day_start, flex_start, day_end = build_schedule(day_index)
+    day_type = "Будний день" if is_weekday else "Выходной день"
+    focus_tip = escape(choice(FOCUS_TIPS))
+    static_tasks = "\n".join(render_static_event(event) for event in events)
+    events_json = json.dumps(events, ensure_ascii=False).replace("<", "\\u003c")
+
+    # f-строка подставляет актуальную дату, день недели и список дел.
+    page = f"{PAGE_TEMPLATE.replace('__DATE__', escape(date_label)).replace('__DATE_ISO__', date_iso).replace('__WEEKDAY__', escape(weekday.capitalize())).replace('__DAY_TYPE__', escape(day_type)).replace('__STATIC_TASKS__', static_tasks).replace('__EVENTS_JSON__', events_json).replace('__DAY_START__', str(day_start)).replace('__FLEX_START__', str(flex_start)).replace('__DAY_END__', str(day_end)).replace('__FOCUS_TIP__', focus_tip).replace('__UPDATED__', now.strftime('%H:%M'))}"
 
     output_path = Path(__file__).with_name("index.html")
     output_path.write_text(page, encoding="utf-8")
