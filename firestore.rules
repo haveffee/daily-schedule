@@ -31,5 +31,9 @@ service cloud.firestore {
       allow create, update: if ownsData(userId) && validTask();
       allow delete: if ownsData(userId);
     }
+
+    match /users/{userId}/planning/{monthId} {
+      allow read, create, update, delete: if ownsData(userId);
+    }
   }
 }

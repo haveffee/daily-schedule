@@ -102,21 +102,40 @@
     .sync-button { flex: 0 0 auto; white-space: nowrap; }
     .sync-button:disabled { cursor: not-allowed; opacity: .55; }
     .task-form button:disabled { cursor: wait; opacity: .55; }
-    .ai-panel { border-color: rgba(119,82,168,.15); background: linear-gradient(145deg, rgba(119,82,168,.055), rgba(255,255,255,.92) 42%); }
-    .ai-form { display: grid; gap: 12px; }
-    .ai-form textarea {
-      width: 100%; min-height: 112px; resize: vertical; padding: 13px 14px;
-      border: 1px solid #d2d2d7; border-radius: 14px; background: #fff; color: var(--ink);
-      font: inherit; font-size: 15px; line-height: 1.5;
+    .goals-panel { border-color: rgba(119,82,168,.15); background: linear-gradient(145deg, rgba(119,82,168,.055), rgba(255,255,255,.94) 42%); }
+    .goals-topline { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .goal-period { color: var(--muted); font-size: 13px; white-space: nowrap; }
+    .goal-form { display: grid; grid-template-columns: 1fr 1.2fr 160px; gap: 12px; align-items: end; margin-top: 18px; }
+    .goal-form label { display: grid; gap: 7px; font-size: 12px; font-weight: 650; }
+    .goal-form input, .goal-form select {
+      width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #d2d2d7;
+      border-radius: 13px; background: #fff; color: var(--ink); font: inherit; font-size: 14px;
     }
-    .ai-form textarea:focus { outline: 3px solid rgba(119,82,168,.16); border-color: #7752a8; }
-    .ai-form button { justify-self: start; background: #7752a8; }
-    .ai-form button:disabled { cursor: wait; opacity: .55; }
-    .ai-privacy, .ai-status { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
-    .ai-status { min-height: 18px; }
-    .ai-answer { margin-top: 12px; padding: 16px; border: 1px solid rgba(119,82,168,.14); border-radius: 15px; background: rgba(255,255,255,.8); }
-    .ai-answer[hidden] { display: none; }
-    .ai-answer p { margin: 0; white-space: pre-wrap; font-size: 14px; line-height: 1.6; }
+    .goal-form input:focus, .goal-form select:focus { outline: 3px solid rgba(119,82,168,.16); border-color: #7752a8; }
+    .goal-form button { grid-column: 1 / -1; justify-self: start; background: #7752a8; }
+    .goal-list { display: grid; gap: 8px; margin: 15px 0 0; padding: 0; list-style: none; }
+    .goal-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.75); }
+    .goal-row strong { display: block; font-size: 14px; }
+    .goal-row span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .goal-remove { min-height: 34px; padding: 0 10px; background: #f2f2f7; color: #c0392b; font-size: 12px; }
+    .ai-privacy { margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .goal-plan-controls { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-top: 17px; }
+    .goal-plan-controls button { background: #7752a8; }
+    .goal-plan-controls button:disabled { cursor: not-allowed; opacity: .55; }
+    .goal-status { min-height: 18px; margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .goal-status.error { color: #b42318; }
+    .goal-roadmap { margin-top: 14px; }
+    .goal-week { margin-top: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255,255,255,.68); }
+    .goal-week h3 { margin: 0 0 8px; font-size: 14px; }
+    .goal-plan-task { display: grid; grid-template-columns: 20px minmax(0,1fr) auto; gap: 9px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
+    .goal-plan-task input { width: 17px; min-height: 17px; height: 17px; margin: 2px 0 0; accent-color: #34a853; }
+    .goal-plan-task strong { display: block; font-size: 13px; line-height: 1.4; }
+    .goal-plan-task p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .goal-plan-task[data-done="true"] strong { color: var(--muted); text-decoration: line-through; }
+    .goal-task-meta { color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .goal-resource, .task-resource { display: inline-block; margin-top: 5px; color: var(--blue); font-size: 12px; font-weight: 600; text-decoration: none; }
+    .goal-resource:hover, .task-resource:hover { text-decoration: underline; }
+    .goal-empty { color: var(--muted); font-size: 13px; }
     .my-tasks { margin-top: 12px; padding: 0; list-style: none; }
     .my-task {
       display: grid; grid-template-columns: 22px minmax(0,1fr) auto; align-items: center;
@@ -155,6 +174,7 @@
     .task-copy p { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
     .task--personal .task-time { color: var(--green); }
     .task--custom .task-time { color: #8a4baf; }
+    .task--goal .task-time { color: #7752a8; }
     .task--habit { background: linear-gradient(90deg, rgba(0,113,227,.035), transparent 75%); }
     .task--habit .task-time { color: #7752a8; }
     .task--current {
@@ -199,7 +219,12 @@
       .task-form button { grid-column: 1 / -1; }
       .sync-row { align-items: stretch; flex-direction: column; }
       .sync-button { width: 100%; }
-      .ai-form button { width: 100%; }
+      .goal-form { grid-template-columns: 1fr 1fr; }
+      .goal-form label:first-child, .goal-form button { grid-column: 1 / -1; }
+      .goal-form button { width: 100%; }
+      .goal-plan-controls button { width: 100%; }
+      .goal-plan-task { grid-template-columns: 20px minmax(0,1fr); }
+      .goal-task-meta { grid-column: 2; }
       .schedule { border-radius: 22px; }
       .schedule-heading { padding: 20px 17px 14px; }
       .task { grid-template-columns: 78px 27px 20px minmax(0,1fr); gap: 8px; padding: 15px 13px; }
@@ -236,6 +261,33 @@
       <span>Одна полезная привычка · 5 минут в день</span>
       <p>Пять минут чтения</p>
     </section>
+    <section class="panel goals-panel" aria-labelledby="goals-title">
+      <div class="goals-topline">
+        <p class="section-label">Цели и развитие</p>
+        <span class="goal-period">Октябрь 2026</span>
+      </div>
+      <h2 id="goals-title">Цели на месяц</h2>
+      <p class="panel-intro">Добавь до трёх конкретных целей на этот месяц. Qwen предложит поэтапный план и поставит занятия в свободные окна, сохраняя работу, репетиторов и отдых. Войди через Google, чтобы видеть те же цели на телефоне и компьютере.</p>
+      <form class="goal-form" id="goalForm">
+        <label>Цель
+          <input name="title" maxlength="90" placeholder="Например, научиться видеомонтажу" required>
+        </label>
+        <label>Результат к концу месяца
+          <input name="outcome" maxlength="160" placeholder="Смонтировать и опубликовать ролик" required>
+        </label>
+        <label>Время на цель · мин/неделю
+          <select name="weeklyMinutes"><option value="60">60</option><option value="90" selected>90</option><option value="120">120</option></select>
+        </label>
+        <button type="submit">Добавить цель</button>
+      </form>
+      <ul class="goal-list" id="goalList"></ul>
+      <div class="goal-plan-controls">
+        <button id="generatePlanButton" type="button" disabled>Составить план на месяц</button>
+      </div>
+      <p class="goal-status" id="goalStatus" aria-live="polite">Планировщик готов. Добавь цель и создай план.</p>
+      <div class="goal-roadmap" id="goalRoadmap"></div>
+      <p class="ai-privacy">План формирует локальная Qwen-модель: цели не отправляются AI-провайдеру. На совместимом компьютере с WebGPU и 8 ГБ памяти доступна более крупная модель (около 1,43 ГБ); на телефоне используется компактная (около 570 МБ). Для обучающих шагов добавляется ссылка на поиск видеоуроков в YouTube — конкретный ролик ты выберешь сам. При первом построении нужен интернет для загрузки модели с Hugging Face.</p>
+    </section>
     <section class="panel" aria-labelledby="custom-title">
       <p class="section-label">Планировщик</p>
       <h2 id="custom-title">Добавить дело на сегодня</h2>
@@ -263,20 +315,6 @@
       <p class="storage-note">Без времени дело поставится в ближайшее свободное окно. Если окно занято — поиск продолжится позже. Для общего списка войди в один Google-аккаунт на компьютере и iPhone.</p>
       <p class="message" id="message" aria-live="polite"></p>
       <ul class="my-tasks" id="myTasks"></ul>
-    </section>
-    <section class="panel ai-panel" aria-labelledby="ai-title">
-      <p class="section-label">Умный помощник</p>
-      <h2 id="ai-title">Обсуди план на сегодня</h2>
-      <p class="panel-intro">Напиши, что нужно учесть или что тебя беспокоит. Qwen посмотрит на расписание и предложит выполнимый план и следующий шаг.</p>
-      <form class="ai-form" id="aiForm">
-        <label for="aiPrompt">Твой вопрос или заметка
-          <textarea id="aiPrompt" maxlength="1200" placeholder="Например: сегодня мало сил, но нужно подготовиться к математике и разобрать комнату. Как лучше распределить дела?" required></textarea>
-        </label>
-        <button id="aiButton" type="submit">Спросить Qwen</button>
-      </form>
-      <p class="ai-privacy">Библиотека и веса Qwen загружаются с jsDelivr и Hugging Face. После этого модель работает в браузере: текст вопроса, расписание и список дел не отправляются провайдеру. При первом запуске модель скачает около 570 МБ на устройстве с WebGPU или около 919 МБ в режиме CPU; браузер обычно сохраняет её в кэше. Нужен интернет для загрузки, скорость зависит от устройства.</p>
-      <p class="ai-status" id="aiStatus" aria-live="polite">Qwen готов. Модель загрузится при первом вопросе.</p>
-      <div class="ai-answer" id="aiAnswer" hidden aria-live="polite"><p id="aiAnswerText"></p></div>
     </section>
     <section class="schedule" aria-labelledby="schedule-title">
       <div class="schedule-heading">
@@ -332,13 +370,14 @@
       <h2 id="focus-title">💡 Фокус дня</h2>
       <p>Попробуй Pomodoro: 25 минут сосредоточенной работы, затем 5 минут отдыха. После четырех циклов сделай длинный перерыв.</p>
     </section>
-    <footer>Обновлено 15:03 по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
+    <footer>Обновлено 18:09 по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
   </main>
-  <script src="./firebase-config.js?v=fc374-ai1"></script>
+  <script src="./firebase-config.js?v=fc374-plan1"></script>
   <script>
     "use strict";
     const baseEvents = [{"start": 600, "end": 615, "icon": "☀️", "title": "Подъем", "description": "Спокойное начало выходного дня.", "category": "fixed"}, {"start": 615, "end": 645, "icon": "🥣", "title": "Завтрак", "description": "Позавтракай и подготовься к учебе.", "category": "fixed"}, {"start": 645, "end": 650, "icon": "📖", "title": "Микропривычка недели", "description": "Пять минут чтения: Прочитай пару страниц полезной книги без уведомлений.", "category": "habit"}, {"start": 650, "end": 770, "icon": "📚", "title": "Домашние задания репетиторам", "description": "Выдели время на задания по английскому и математике.", "category": "fixed"}, {"start": 770, "end": 810, "icon": "🍽️", "title": "Обед и отдых", "description": "Перерыв перед второй половиной дня.", "category": "fixed"}];
     const dateKey = "2026-10-18";
+    const monthKey = "2026-10";
     const dayStart = 600;
     const flexStart = 810;
     const dayEnd = 1320;
@@ -353,12 +392,14 @@
     const message = document.getElementById("message");
     const waitlist = document.getElementById("waitlist");
     const form = document.getElementById("taskForm");
-    const aiForm = document.getElementById("aiForm");
-    const aiInput = document.getElementById("aiPrompt");
-    const aiButton = document.getElementById("aiButton");
-    const aiStatus = document.getElementById("aiStatus");
-    const aiAnswer = document.getElementById("aiAnswer");
-    const aiAnswerText = document.getElementById("aiAnswerText");
+    const goalForm = document.getElementById("goalForm");
+    const goalList = document.getElementById("goalList");
+    const goalStatus = document.getElementById("goalStatus");
+    const goalRoadmap = document.getElementById("goalRoadmap");
+    const generatePlanButton = document.getElementById("generatePlanButton");
+    const weeklyMinutesOptions = new Set([60, 90, 120]);
+    const localPlanningKey = "daily-schedule-planning-" + monthKey;
+    let planningStorageKey = localPlanningKey;
 
     function readTasks(key = storageKey) {
       try {
@@ -389,6 +430,41 @@
 
     let userTasks = readTasks();
     let completedScheduleItems = readScheduleCompletions();
+    function normalizePlanning(value) {
+      try {
+        const parsed = typeof value === "string" ? JSON.parse(value || "null") : value;
+        if (!parsed || typeof parsed !== "object") return { goals: [], tasks: [], generatedAt: "" };
+        const goals = Array.isArray(parsed.goals) ? parsed.goals.filter((goal) =>
+          goal && typeof goal.id === "string" && typeof goal.title === "string" &&
+          typeof goal.outcome === "string" && weeklyMinutesOptions.has(Number(goal.weeklyMinutes))
+        ).slice(0, 3) : [];
+        const goalIds = new Set(goals.map((goal) => goal.id));
+        const tasks = Array.isArray(parsed.tasks) ? parsed.tasks.filter((task) =>
+          task && typeof task.id === "string" && goalIds.has(task.goalId) &&
+          /^\d{4}-\d{2}-\d{2}$/.test(task.date) && typeof task.title === "string" &&
+          Number.isFinite(Number(task.duration))
+        ).map((task) => ({ ...task, done: Boolean(task.done) })) : [];
+        return { goals, tasks, generatedAt: typeof parsed.generatedAt === "string" ? parsed.generatedAt : "" };
+      } catch (error) {
+        return { goals: [], tasks: [], generatedAt: "" };
+      }
+    }
+    function readPlanning(key = planningStorageKey) {
+      try {
+        return normalizePlanning(localStorage.getItem(key));
+      } catch (error) {
+        return { goals: [], tasks: [], generatedAt: "" };
+      }
+    }
+    let planning = readPlanning();
+    let planningCloudReady = false;
+    let planningLoading = false;
+    let planningDirty = false;
+    let stopPlanningListener = null;
+    let planningSaveQueue = Promise.resolve();
+    let plannerModel = null;
+    let plannerModelLoading = null;
+    let planGenerationRunning = false;
 
     const syncButton = document.getElementById("syncButton");
     const syncStatus = document.getElementById("syncStatus");
@@ -404,9 +480,6 @@
     let firebaseApi = null;
     let firebaseAuth = null;
     let firebaseApp = null;
-    let aiModel = null;
-    let aiModelLoading = null;
-    let aiRequestInProgress = false;
     let currentUser = null;
     let cloudReady = false;
     let syncLoading = false;
@@ -418,52 +491,41 @@
       syncStatus.style.color = isError ? "#b42318" : "";
     }
 
-    function setAiMessage(text, isError = false) {
-      aiStatus.textContent = text;
-      aiStatus.style.color = isError ? "#b42318" : "";
-    }
-
-    async function loadQwenModel() {
-      if (aiModel) return aiModel;
-      if (aiModelLoading) return aiModelLoading;
-
-      aiModelLoading = (async () => {
-        setAiMessage("Подключаю библиотеку Qwen…");
-        const { pipeline } = await import(
-          "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1"
-        );
-        const useWebGpu = Boolean(navigator.gpu);
-        const device = useWebGpu ? "webgpu" : "wasm";
-        const dtype = useWebGpu ? "q4f16" : "q4";
-        setAiMessage(useWebGpu
-          ? "Загружаю Qwen (около 570 МБ). Не закрывай страницу…"
-          : "WebGPU недоступен. Загружаю более крупную CPU-версию Qwen; это может занять больше времени и памяти…");
-
-        const model = await pipeline(
-          "text-generation",
-          "onnx-community/Qwen3-0.6B-ONNX",
-          {
-            device,
-            dtype,
-            progress_callback: (progress) => {
-              if (progress?.status === "progress" && Number.isFinite(progress.progress)) {
-                const percent = Math.round(progress.progress);
-                const file = String(progress.file || "модель").split("/").pop();
-                setAiMessage(`Загружаю ${file}: ${percent}%. Не закрывай страницу…`);
-              }
-            },
+    async function loadPlannerModel() {
+      if (plannerModel) return plannerModel;
+      if (plannerModelLoading) return plannerModelLoading;
+      plannerModelLoading = (async () => {
+        goalStatus.classList.remove("error");
+        goalStatus.textContent = "Загружаю локальный планировщик Qwen…";
+        const { pipeline } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1");
+        const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+        const largeDesktop = !mobile && Boolean(navigator.gpu) && Number(navigator.deviceMemory || 0) >= 8;
+        const device = navigator.gpu ? "webgpu" : "wasm";
+        const modelId = largeDesktop ? "onnx-community/Qwen3-1.7B-ONNX" : "onnx-community/Qwen3-0.6B-ONNX";
+        const dtype = device === "webgpu" ? "q4f16" : "q4";
+        goalStatus.textContent = largeDesktop
+          ? "Загружаю Qwen 1.7B (около 1,43 ГБ). Не закрывай страницу."
+          : (device === "webgpu"
+            ? "Загружаю компактную Qwen (около 570 МБ). Не закрывай страницу."
+            : "WebGPU недоступен: загружаю Qwen 0.6B для CPU (около 919 МБ). Генерация может быть медленной.");
+        plannerModel = await pipeline("text-generation", modelId, {
+          device,
+          dtype,
+          progress_callback: (progress) => {
+            if (progress?.status === "progress" && Number.isFinite(progress.progress)) {
+              const file = String(progress.file || "модель").split("/").pop();
+              goalStatus.textContent = `Загружаю ${file}: ${Math.round(progress.progress)}%. Не закрывай страницу…`;
+            }
           },
-        );
-        aiModel = model;
-        return model;
+        });
+        return plannerModel;
       })().catch((error) => {
-        aiModel = null;
+        plannerModel = null;
         throw error;
       }).finally(() => {
-        aiModelLoading = null;
+        plannerModelLoading = null;
       });
-
-      return aiModelLoading;
+      return plannerModelLoading;
     }
 
     function updateSyncControls() {
@@ -474,6 +536,138 @@
       addButton.disabled = syncLoading;
       syncAccount.hidden = !currentUser;
       syncAccount.textContent = currentUser ? (currentUser.email || "Вход через Google") : "";
+      updateGoalControls();
+    }
+
+    function updateGoalControls() {
+      const waitingForCloud = Boolean(currentUser) && planningLoading;
+      for (const control of goalForm.elements) control.disabled = waitingForCloud || planGenerationRunning;
+      generatePlanButton.disabled = waitingForCloud || planGenerationRunning || planning.goals.length === 0;
+    }
+
+    function planningDocument(userId) {
+      return firebaseApi.doc(firebaseApi.db, "users", userId, "planning", monthKey);
+    }
+
+    function storePlanningLocally() {
+      try {
+        localStorage.setItem(planningStorageKey, JSON.stringify(planning));
+        return true;
+      } catch (error) {
+        goalStatus.textContent = "Не удалось сохранить цели в браузере. Проверь настройки хранилища.";
+        goalStatus.classList.add("error");
+        return false;
+      }
+    }
+
+    function persistPlanning() {
+      if (!storePlanningLocally()) return;
+      planningDirty = true;
+      if (!currentUser || !planningCloudReady) return;
+      const userId = currentUser.uid;
+      const serialized = JSON.stringify(planning);
+      planningSaveQueue = planningSaveQueue.catch(() => {}).then(() =>
+        firebaseApi.setDoc(planningDocument(userId), {
+          ...JSON.parse(serialized),
+          updatedAt: firebaseApi.serverTimestamp(),
+        })
+      ).then(() => {
+        if (currentUser?.uid === userId && JSON.stringify(planning) === serialized) {
+          planningDirty = false;
+          goalStatus.textContent = "Цели и план сохранены и синхронизированы.";
+          goalStatus.classList.remove("error");
+        }
+      }).catch((error) => {
+        goalStatus.textContent = "Сохранено на устройстве, но синхронизация не удалась. Проверь правила Firestore и интернет.";
+        goalStatus.classList.add("error");
+        console.error("Firestore planning update error:", error);
+      });
+    }
+
+    function mergePlanning(localPlan, remotePlan) {
+      const goals = [...remotePlan.goals];
+      for (const goal of localPlan.goals) {
+        if (goals.length >= 3) break;
+        if (!goals.some((candidate) => candidate.id === goal.id)) goals.push(goal);
+      }
+      const goalIds = new Set(goals.map((goal) => goal.id));
+      const tasks = new Map(remotePlan.tasks.filter((task) => goalIds.has(task.goalId)).map((task) => [task.id, task]));
+      for (const task of localPlan.tasks) {
+        if (goalIds.has(task.goalId) && !tasks.has(task.id)) tasks.set(task.id, task);
+      }
+      return { goals, tasks: [...tasks.values()], generatedAt: remotePlan.generatedAt || localPlan.generatedAt };
+    }
+
+    async function connectMonthlyPlanning(user, generation) {
+      planningLoading = true;
+      updateGoalControls();
+      const accountKey = localPlanningKey + "-user-" + user.uid;
+      const hasAccountCache = localStorage.getItem(accountKey) !== null;
+      const migrationKeyForUser = localPlanningKey + "-cloud-migrated-" + user.uid;
+      const migrationDone = localStorage.getItem(migrationKeyForUser) === "yes";
+      const anonymousPlan = readPlanning(localPlanningKey);
+      planningStorageKey = accountKey;
+      planning = hasAccountCache
+        ? readPlanning(accountKey)
+        : (migrationDone ? { goals: [], tasks: [], generatedAt: "" } : anonymousPlan);
+      planningDirty = false;
+      storePlanningLocally();
+      renderPlanning();
+      render();
+      goalStatus.textContent = "Загружаю цели и план из общего хранилища…";
+      try {
+        const reference = planningDocument(user.uid);
+        const snapshot = await firebaseApi.getDoc(reference);
+        if (generation !== syncGeneration) return;
+        if (snapshot.exists()) {
+          const remote = normalizePlanning(snapshot.data());
+          planning = (!hasAccountCache && !migrationDone)
+            ? mergePlanning(anonymousPlan, remote)
+            : remote;
+          storePlanningLocally();
+          if (!hasAccountCache && !migrationDone && anonymousPlan.goals.length) planningDirty = true;
+        } else if (planning.goals.length || planning.tasks.length) {
+          planningDirty = true;
+        }
+        if (!migrationDone) localStorage.setItem(migrationKeyForUser, "yes");
+        planningCloudReady = true;
+        planningLoading = false;
+        updateGoalControls();
+        renderPlanning();
+        render();
+        if (planningDirty) persistPlanning();
+        else goalStatus.textContent = planning.goals.length
+          ? "Цели и план загружены из общего хранилища."
+          : "Добавь цели на месяц и составь первый план.";
+        if (stopPlanningListener) stopPlanningListener();
+        stopPlanningListener = firebaseApi.onSnapshot(reference, (remoteSnapshot) => {
+          if (generation !== syncGeneration) return;
+          if (!remoteSnapshot.exists()) {
+            if (planningDirty) persistPlanning();
+            return;
+          }
+          if (planningDirty) {
+            persistPlanning();
+            return;
+          }
+          planning = normalizePlanning(remoteSnapshot.data());
+          storePlanningLocally();
+          renderPlanning();
+          render();
+        }, (error) => {
+          goalStatus.textContent = "Не удалось обновить план из Firestore. Локальная копия доступна.";
+          goalStatus.classList.add("error");
+          console.error("Firestore planning listener error:", error);
+        });
+      } catch (error) {
+        if (generation !== syncGeneration) return;
+        planningCloudReady = false;
+        planningLoading = false;
+        updateGoalControls();
+        goalStatus.textContent = "Не удалось подключить облачный план. Цели пока остаются на этом устройстве.";
+        goalStatus.classList.add("error");
+        console.error("Firestore planning initialization error:", error);
+      }
     }
 
     function validTask(task) {
@@ -542,7 +736,11 @@
           cloudReady = false;
           syncLoading = Boolean(user);
           if (stopCloudListener) stopCloudListener();
+          if (stopPlanningListener) stopPlanningListener();
           stopCloudListener = null;
+          stopPlanningListener = null;
+          planningCloudReady = false;
+          planningLoading = Boolean(user);
           updateSyncControls();
 
           if (!user) {
@@ -550,6 +748,12 @@
             userTasks = readTasks(localStorageKey);
             completionStorageKey = localCompletionStorageKey;
             completedScheduleItems = readScheduleCompletions(localCompletionStorageKey);
+            planningStorageKey = localPlanningKey;
+            planning = readPlanning(localPlanningKey);
+            planningDirty = false;
+            planningLoading = false;
+            renderPlanning();
+            updateGoalControls();
             render();
             setSyncMessage("Пока дела доступны только в этом браузере. Войди в тот же Google-аккаунт на втором устройстве.");
             return;
@@ -573,6 +777,7 @@
           saveTasks();
           saveScheduleCompletions();
           render();
+          void connectMonthlyPlanning(user, generation);
 
           try {
             const collectionRef = taskCollection(user.uid);
@@ -686,8 +891,332 @@
       }
     }
 
+    function goalResourceUrl(goal, task) {
+      const query = `${goal.title} ${task.title} обучение урок`;
+      return "https://www.youtube.com/results?search_query=" + encodeURIComponent(query);
+    }
+
+    function renderPlanning() {
+      goalList.replaceChildren();
+      generatePlanButton.disabled = Boolean(currentUser && planningLoading) ||
+        planGenerationRunning || planning.goals.length === 0;
+      if (planning.goals.length === 0) {
+        const empty = document.createElement("li");
+        empty.className = "goal-empty";
+        empty.textContent = "Добавь конкретную цель и результат, которого хочешь достичь к концу месяца.";
+        goalList.append(empty);
+      } else {
+        for (const goal of planning.goals) {
+          const row = document.createElement("li");
+          row.className = "goal-row";
+          const copy = document.createElement("div");
+          const title = document.createElement("strong");
+          title.textContent = goal.title;
+          const outcome = document.createElement("span");
+          outcome.textContent = `${goal.outcome} · ${goal.weeklyMinutes} мин/неделю`;
+          copy.append(title, outcome);
+          const remove = document.createElement("button");
+          remove.className = "goal-remove";
+          remove.type = "button";
+          remove.textContent = "Удалить";
+          remove.addEventListener("click", () => {
+            planning.goals = planning.goals.filter((item) => item.id !== goal.id);
+            planning.tasks = planning.tasks.filter((task) => task.goalId !== goal.id);
+            planning.generatedAt = "";
+            persistPlanning();
+            renderPlanning();
+            render();
+          });
+          row.append(copy, remove);
+          goalList.append(row);
+        }
+      }
+
+      goalRoadmap.replaceChildren();
+      if (planning.tasks.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "goal-empty";
+        empty.textContent = planning.goals.length
+          ? "Пока нет плана. Нажми «Составить план на месяц»."
+          : "План появится здесь после добавления цели.";
+        goalRoadmap.append(empty);
+        updateGoalControls();
+        return;
+      }
+
+      const goalsById = new Map(planning.goals.map((goal) => [goal.id, goal]));
+      const groups = new Map();
+      for (const task of planning.tasks.slice().sort((a, b) =>
+        a.date.localeCompare(b.date) || String(a.time || "00:00").localeCompare(String(b.time || "00:00")))) {
+        if (!goalsById.has(task.goalId)) continue;
+        if (!groups.has(task.week)) groups.set(task.week, []);
+        groups.get(task.week).push(task);
+      }
+      const completed = planning.tasks.filter((task) => task.done).length;
+      const summary = document.createElement("p");
+      summary.className = "goal-empty";
+      summary.textContent = `${completed} из ${planning.tasks.length} шагов выполнено${planning.generatedAt ? ` · план создан ${planning.generatedAt}` : ""}.`;
+      goalRoadmap.append(summary);
+      for (const [week, tasks] of [...groups.entries()].sort((a, b) => Number(a[0]) - Number(b[0]))) {
+        const weekCard = document.createElement("section");
+        weekCard.className = "goal-week";
+        const heading = document.createElement("h3");
+        const firstTask = tasks[0];
+        const range = firstTask?.weekStart && firstTask?.weekEnd
+          ? { from: firstTask.weekStart, to: firstTask.weekEnd }
+          : planWeeksRemaining().find((item) => item.number === Number(week));
+        const rangeLabel = range
+          ? `${new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", timeZone: "Europe/Moscow" }).format(new Date(`${range.from}T00:00:00Z`))}–${new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", timeZone: "Europe/Moscow" }).format(new Date(`${range.to}T00:00:00Z`))}`
+          : "";
+        heading.textContent = `Неделя ${week}${rangeLabel ? ` · ${rangeLabel}` : ""}`;
+        weekCard.append(heading);
+        for (const task of tasks) {
+          const goal = goalsById.get(task.goalId);
+          const row = document.createElement("div");
+          row.className = "goal-plan-task";
+          row.dataset.done = String(Boolean(task.done));
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = Boolean(task.done);
+          checkbox.setAttribute("aria-label", `${task.done ? "Снять отметку" : "Отметить выполненным"}: ${task.title}`);
+          checkbox.addEventListener("change", () => toggleGoalTask(task.id, checkbox.checked));
+          const copy = document.createElement("div");
+          const title = document.createElement("strong");
+          title.textContent = task.title;
+          const description = document.createElement("p");
+          description.textContent = `${goal.title} · ${task.description}`;
+          copy.append(title, description);
+          const resource = document.createElement("a");
+          resource.className = "goal-resource";
+          resource.href = goalResourceUrl(goal, task);
+          resource.target = "_blank";
+          resource.rel = "noopener noreferrer";
+          resource.textContent = "Найти видеоурок ↗";
+          copy.append(resource);
+          const meta = document.createElement("span");
+          meta.className = "goal-task-meta";
+          meta.textContent = `${new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", timeZone: "Europe/Moscow" }).format(new Date(`${task.date}T00:00:00Z`))} · ${task.time} · ${task.duration} мин`;
+          row.append(checkbox, copy, meta);
+          weekCard.append(row);
+        }
+        goalRoadmap.append(weekCard);
+      }
+      updateGoalControls();
+    }
+
+    function toggleGoalTask(taskId, done) {
+      const task = planning.tasks.find((item) => item.id === taskId);
+      if (!task) return;
+      task.done = Boolean(done);
+      persistPlanning();
+      renderPlanning();
+      render();
+    }
+
+    function utcDateKey(date) {
+      return [date.getUTCFullYear(), String(date.getUTCMonth() + 1).padStart(2, "0"),
+        String(date.getUTCDate()).padStart(2, "0")].join("-");
+    }
+
+    function planWeeksRemaining() {
+      const [year, month, day] = dateKey.split("-").map(Number);
+      const first = new Date(Date.UTC(year, month - 1, 1));
+      const today = new Date(Date.UTC(year, month - 1, day));
+      const last = new Date(Date.UTC(year, month, 0));
+      let cursor = today > first ? today : first;
+      const weeks = [];
+      while (cursor <= last) {
+        const monday = new Date(cursor);
+        const weekday = monday.getUTCDay() || 7;
+        monday.setUTCDate(monday.getUTCDate() - weekday + 1);
+        const sunday = new Date(monday);
+        sunday.setUTCDate(sunday.getUTCDate() + 6);
+        const end = sunday < last ? sunday : last;
+        const start = cursor > monday ? cursor : monday;
+        const dates = [];
+        const candidateWeekdays = [2, 5, 0, 3, 6, 1, 4];
+        for (const preferredDay of candidateWeekdays) {
+          const candidate = new Date(start);
+          const offset = (preferredDay - candidate.getUTCDay() + 7) % 7;
+          candidate.setUTCDate(candidate.getUTCDate() + offset);
+          if (candidate <= end && candidate >= today && !dates.includes(utcDateKey(candidate))) {
+            dates.push(utcDateKey(candidate));
+          }
+        }
+        weeks.push({
+          number: weeks.length + 1,
+          from: utcDateKey(start),
+          to: utcDateKey(end),
+          dates,
+        });
+        cursor = new Date(end);
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+      }
+      return weeks;
+    }
+
+    function preferredGoalTime(date, sessionIndex) {
+      const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+      if (day === 0 || day === 6) return sessionIndex === 0 ? "14:00" : "15:00";
+      if (day === 1 || day === 3) return "20:45";
+      if (day === 2) return "20:45";
+      if (day === 4) return "21:45";
+      return sessionIndex === 0 ? "19:00" : "20:00";
+    }
+
+    function generatedText(result) {
+      const generated = result?.[0]?.generated_text;
+      const lastMessage = Array.isArray(generated) ? generated[generated.length - 1] : null;
+      let output = (typeof generated === "string" ? generated : lastMessage?.content || "").trim();
+      if (output.includes("</think>")) output = output.split("</think>").at(-1).trim();
+      return output.replace(/^<think>[\s\S]*?<\/think>\s*/i, "").trim();
+    }
+
+    function parseGoalSteps(text, weeks) {
+      try {
+        const start = text.indexOf("{");
+        const end = text.lastIndexOf("}");
+        if (start < 0 || end <= start) return new Map();
+        const parsed = JSON.parse(text.slice(start, end + 1));
+        const map = new Map();
+        for (const week of Array.isArray(parsed.weeks) ? parsed.weeks : []) {
+          const number = Number(week.week);
+          const sessions = Array.isArray(week.sessions) ? week.sessions : [];
+          map.set(number, sessions.slice(0, 2).map((session) => ({
+            title: String(session.title || "").trim().slice(0, 100),
+            description: String(session.description || "").trim().slice(0, 220),
+          })).filter((session) => session.title && session.description));
+        }
+        for (const week of weeks) if (!map.has(week.number)) map.set(week.number, []);
+        return map;
+      } catch (error) {
+        return new Map();
+      }
+    }
+
+    function fallbackGoalStep(goal, weekNumber, sessionIndex) {
+      const stages = [
+        ["Разобраться в основах", "Посмотри вводный материал, выпиши три ключевые идеи и выбери один навык для практики."],
+        ["Потренировать один навык", "Повтори прием из урока на небольшом примере и сохрани результат."],
+        ["Сделать мини-проект", "Примени изученное к части результата, который хочешь получить к концу месяца."],
+        ["Проверить и улучшить", "Сравни результат с целью, исправь одну слабую часть и запиши следующий шаг."],
+      ];
+      const stage = stages[(weekNumber - 1 + sessionIndex) % stages.length];
+      return { title: `${stage[0]}: ${goal.title}`, description: stage[1] };
+    }
+
+    async function createMonthPlan() {
+      if (!planning.goals.length || planGenerationRunning) return;
+      const weeks = planWeeksRemaining();
+      if (!weeks.some((week) => week.dates.length)) {
+        goalStatus.textContent = "В этом месяце больше не осталось дней для планирования.";
+        return;
+      }
+      planGenerationRunning = true;
+      generatePlanButton.textContent = "Составляю план…";
+      updateGoalControls();
+      const previousDone = new Map(planning.tasks.map((task) => [task.id, Boolean(task.done)]));
+      const planned = [];
+      let usedFallback = false;
+      try {
+        const model = await loadPlannerModel();
+        for (let goalIndex = 0; goalIndex < planning.goals.length; goalIndex += 1) {
+          const goal = planning.goals[goalIndex];
+          goalStatus.textContent = `Продумываю шаги для цели ${goalIndex + 1} из ${planning.goals.length}…`;
+          const monthSchedule = weeks.map((week) => ({
+            week: week.number,
+            dates: week.dates,
+            minutesPerSession: Math.round(Number(goal.weeklyMinutes) / 2 / 5) * 5,
+          }));
+          const prompt = `На русском спланируй цель на оставшуюся часть месяца. Цель: ${goal.title}. Итог месяца: ${goal.outcome}. Для каждой недели верни ровно два последовательных занятия; каждое занятие должно занимать ${Math.round(Number(goal.weeklyMinutes) / 2 / 5) * 5} минут. Упражнения должны быть конкретными, разные занятия продолжать друг друга и вести к указанному итогу. В ответе дай только JSON: корневой объект, поле weeks — массив; внутри каждой записи поле week с номером недели и поле sessions — массив из двух объектов с короткими полями title и description. Недели, которые нужно заполнить: ${JSON.stringify(monthSchedule)}. Не добавляй разметку, пояснения или Markdown. /no_think`;
+          let stepsByWeek = new Map();
+          try {
+            const result = await model([
+              { role: "system", content: "Ты — практичный планировщик навыков. Предлагай небольшие измеримые действия, от простого к сложному. Не утверждай, что искал материалы в интернете. Выдавай только валидный JSON по формату пользователя." },
+              { role: "user", content: prompt },
+            ], { max_new_tokens: 520, do_sample: false });
+            stepsByWeek = parseGoalSteps(generatedText(result), weeks);
+          } catch (error) {
+            console.error("Qwen goal planning error:", error);
+          }
+          for (const week of weeks) {
+            if (!week.dates.length) continue;
+            const sessions = stepsByWeek.get(week.number) || [];
+            for (let sessionIndex = 0; sessionIndex < 2; sessionIndex += 1) {
+              const fallback = fallbackGoalStep(goal, week.number, sessionIndex);
+              const content = sessions[sessionIndex] || fallback;
+              if (!sessions[sessionIndex]) usedFallback = true;
+              const dateIndex = (goalIndex * 2 + sessionIndex) % week.dates.length;
+              const date = week.dates[dateIndex];
+              const id = `goal-${goal.id}-w${week.number}-s${sessionIndex + 1}`;
+              planned.push({
+                id,
+                goalId: goal.id,
+                week: week.number,
+                weekStart: week.from,
+                weekEnd: week.to,
+                date,
+                time: preferredGoalTime(date, sessionIndex),
+                duration: Math.round(Number(goal.weeklyMinutes) / 2 / 5) * 5,
+                title: content.title,
+                description: content.description,
+                done: previousDone.get(id) || false,
+              });
+            }
+          }
+        }
+        planning.tasks = planned;
+        planning.generatedAt = new Intl.DateTimeFormat("ru-RU", {
+          day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow",
+        }).format(new Date());
+        persistPlanning();
+        renderPlanning();
+        render();
+        goalStatus.classList.remove("error");
+        goalStatus.textContent = usedFallback
+          ? "План готов. Для части шагов Qwen вернула неполный формат, поэтому добавлены практичные базовые задания."
+          : "План готов и распределён по оставшимся неделям месяца.";
+      } catch (error) {
+        const fallbackPlan = [];
+        for (let goalIndex = 0; goalIndex < planning.goals.length; goalIndex += 1) {
+          const goal = planning.goals[goalIndex];
+          for (const week of weeks) {
+            if (!week.dates.length) continue;
+            for (let sessionIndex = 0; sessionIndex < 2; sessionIndex += 1) {
+              const content = fallbackGoalStep(goal, week.number, sessionIndex);
+              const date = week.dates[(goalIndex * 2 + sessionIndex) % week.dates.length];
+              const id = `goal-${goal.id}-w${week.number}-s${sessionIndex + 1}`;
+              fallbackPlan.push({ id, goalId: goal.id, week: week.number,
+                weekStart: week.from, weekEnd: week.to, date,
+                time: preferredGoalTime(date, sessionIndex),
+                duration: Math.round(Number(goal.weeklyMinutes) / 2 / 5) * 5,
+                title: content.title, description: content.description,
+                done: previousDone.get(id) || false });
+            }
+          }
+        }
+        planning.tasks = fallbackPlan;
+        planning.generatedAt = new Intl.DateTimeFormat("ru-RU", {
+          day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow",
+        }).format(new Date());
+        persistPlanning();
+        renderPlanning();
+        render();
+        goalStatus.textContent = "Qwen не запустилась, поэтому создан базовый поэтапный план. Проверь интернет и попробуй пересоставить его позже.";
+        goalStatus.classList.add("error");
+        console.error("Planner generation error:", error);
+      } finally {
+        planGenerationRunning = false;
+        generatePlanButton.textContent = "Составить план на месяц";
+        updateGoalControls();
+      }
+    }
+
     function toggleScheduleItem(item, done) {
-      if (item.id) {
+      if (item.goalId) {
+        toggleGoalTask(item.id, done);
+        return;
+      } else if (item.id) {
         const task = userTasks.find((candidate) => candidate.id === item.id);
         if (!task) return;
         task.done = Boolean(done);
@@ -753,6 +1282,15 @@
       const description = document.createElement("p");
       description.textContent = item.description;
       copy.append(currentBadge, title, description);
+      if (item.guideUrl) {
+        const resource = document.createElement("a");
+        resource.className = "task-resource";
+        resource.href = item.guideUrl;
+        resource.target = "_blank";
+        resource.rel = "noopener noreferrer";
+        resource.textContent = "Найти видеоурок ↗";
+        copy.append(resource);
+      }
       article.append(time, icon, checkbox, copy);
       parent.append(article);
     }
@@ -882,7 +1420,36 @@
           });
         }
       }
-      const blocks = baseEvents.concat(placed).slice().sort((a, b) => a.start - b.start);
+      const goalPlaced = [];
+      const goalWaiting = [];
+      const currentGoalTasks = planning.tasks.filter((task) => task.date === dateKey);
+      for (const task of currentGoalTasks) {
+        let preferred = Number(task.time.slice(0, 2)) * 60 + Number(task.time.slice(3, 5));
+        if (task.date === dateKey) {
+          const now = moscowMinutesNow();
+          if (preferred < now) preferred = Math.ceil(now / 5) * 5;
+        }
+        const scheduledTask = { ...task, time: timeLabel(preferred) };
+        const start = findSlot(scheduledTask, placed.concat(goalPlaced));
+        if (start === null) {
+          goalWaiting.push(task);
+        } else {
+          const goal = planning.goals.find((candidate) => candidate.id === task.goalId);
+          goalPlaced.push({
+            id: task.id,
+            goalId: task.goalId,
+            start,
+            end: start + Number(task.duration),
+            icon: "🎯",
+            title: task.title,
+            description: `${goal?.title || "Цель месяца"} · ${task.description}`,
+            guideUrl: goal ? goalResourceUrl(goal, task) : "",
+            category: "goal",
+            done: Boolean(task.done),
+          });
+        }
+      }
+      const blocks = baseEvents.concat(placed, goalPlaced).slice().sort((a, b) => a.start - b.start);
       const items = [];
       let cursor = dayStart;
       for (const block of blocks) {
@@ -924,19 +1491,25 @@
         if (cardItem.category === "personal") classes.push("task--personal");
         if (cardItem.category === "custom") classes.push("task--custom");
         if (cardItem.category === "habit") classes.push("task--habit");
+        if (cardItem.category === "goal") classes.push("task--goal");
         if (cardItem.done) classes.push("task--done");
         addCard(timeline, cardItem, cardItem.start, cardItem.end, classes.join(" "));
       }
       highlightCurrentTask();
       renderUserTasks(placed);
       waitlist.replaceChildren();
-      if (waiting.length) {
+      if (waiting.length || goalWaiting.length) {
         const heading = document.createElement("h3");
         heading.textContent = "Эти дела пока не поместились в расписание";
         const list = document.createElement("ul");
         for (const task of waiting) {
           const row = document.createElement("li");
           row.textContent = task.title + " — " + task.duration + " мин. Уменьши длительность или удали другое дело.";
+          list.append(row);
+        }
+        for (const task of goalWaiting) {
+          const row = document.createElement("li");
+          row.textContent = `${task.title} — шаг месячной цели. В расписании на сегодня не осталось подходящего окна.`;
           list.append(row);
         }
         waitlist.append(heading, list);
@@ -977,62 +1550,37 @@
       }
     });
 
-    aiForm.addEventListener("submit", async (event) => {
+    goalForm.addEventListener("submit", (event) => {
       event.preventDefault();
-      const question = aiInput.value.trim();
-      if (!question || question.length > 1200 || aiRequestInProgress) return;
-
-      const fixedPlan = baseEvents.map((item) => ({
-        time: timeLabel(item.start) + "–" + timeLabel(item.end),
-        title: item.title,
-        completed: Boolean(completedScheduleItems[scheduleCompletionId(item)]),
-      }));
-      const addedTasks = userTasks.map((task) => ({
-        title: task.title,
-        durationMinutes: task.duration,
-        preferredStart: task.time || "не задано",
-        completed: Boolean(task.done),
-      }));
-      const systemPrompt = "Ты — доброжелательный помощник по планированию дня. Всегда отвечай по-русски, коротко и конкретно. Главная долгосрочная цель пользователя — подготовка к ЦЭ/ЦТ для поступления в университет. Сохраняй фиксированные события и их время. Если план перегружен, честно назови это и предложи один реалистичный следующий шаг. Не выдумывай свободное время. Не меняй данные и не утверждай, что добавил задачи. Не показывай ход рассуждений — выдай только полезный итог.";
-      const userPrompt = `Дата по Москве: ${dateKey}.\nФиксированное расписание: ${JSON.stringify(fixedPlan)}\nДополнительные дела пользователя: ${JSON.stringify(addedTasks)}\n\nСообщение пользователя: ${question}\n/no_think`;
-
-      aiRequestInProgress = true;
-      aiButton.disabled = true;
-      aiButton.textContent = "Думаю…";
-      aiAnswer.hidden = true;
-      setAiMessage("Подбираю понятный и выполнимый вариант…");
-      try {
-        const model = await loadQwenModel();
-        setAiMessage("Qwen формирует ответ на этом устройстве…");
-        const result = await model(
-          [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          { max_new_tokens: 240, do_sample: false },
-        );
-        const generated = result?.[0]?.generated_text;
-        const lastMessage = Array.isArray(generated) ? generated[generated.length - 1] : null;
-        let answer = (typeof generated === "string" ? generated : lastMessage?.content || "").trim();
-        if (answer.includes("</think>")) answer = answer.split("</think>").at(-1).trim();
-        answer = answer.replace(/^<think>[\s\S]*?<\/think>\s*/i, "").trim();
-        if (!answer) throw new Error("empty-response");
-        aiAnswerText.textContent = answer;
-        aiAnswer.hidden = false;
-        setAiMessage("Готово. Если совет подходит, добавь дело в планировщик выше.");
-      } catch (error) {
-        const detail = String(error?.message || "").toLowerCase().includes("webgpu")
-          ? "Браузер не смог запустить Qwen через WebGPU. Попробуй открыть сайт в последней версии Safari или Chrome и освободить память устройства."
-          : "Не получилось загрузить или запустить модель Qwen. Проверь интернет и доступ к jsDelivr/Hugging Face; затем обнови страницу и попробуй снова.";
-        setAiMessage(detail, true);
-        console.error("Local Qwen model error:", error);
-      } finally {
-        aiRequestInProgress = false;
-        aiButton.disabled = false;
-        aiButton.textContent = "Спросить Qwen";
+      if (planning.goals.length >= 3) {
+        goalStatus.textContent = "Можно добавить не больше трёх целей на месяц.";
+        goalStatus.classList.add("error");
+        return;
       }
+      const data = new FormData(goalForm);
+      const title = String(data.get("title") || "").trim();
+      const outcome = String(data.get("outcome") || "").trim();
+      const weeklyMinutes = Number(data.get("weeklyMinutes"));
+      if (!title || !outcome || !weeklyMinutesOptions.has(weeklyMinutes)) return;
+      const goal = {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+        title: title.slice(0, 90),
+        outcome: outcome.slice(0, 160),
+        weeklyMinutes,
+      };
+      planning.goals.push(goal);
+      planning.generatedAt = "";
+      persistPlanning();
+      goalForm.reset();
+      goalForm.elements.weeklyMinutes.value = "90";
+      goalStatus.textContent = "Цель добавлена. Составь план, чтобы распределить шаги по месяцу.";
+      goalStatus.classList.remove("error");
+      renderPlanning();
     });
 
+    generatePlanButton.addEventListener("click", () => { void createMonthPlan(); });
+
+    renderPlanning();
     render();
     window.setInterval(highlightCurrentTask, 30_000);
     document.addEventListener("visibilitychange", () => {
