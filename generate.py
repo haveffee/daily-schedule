@@ -348,6 +348,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
       color: #187a35; font-size: 10px; font-weight: 750; letter-spacing: .06em;
       text-transform: uppercase;
     }
+    .current-badge[hidden] { display: none; }
     .current-badge::before {
       width: 7px; height: 7px; border-radius: 50%; background: #34a853; content: "";
       box-shadow: 0 0 0 3px rgba(52,199,89,.15);
