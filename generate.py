@@ -302,7 +302,8 @@ PAGE_TEMPLATE = r"""<!doctype html>
     .sync-copy p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
     .sync-status { overflow-wrap: anywhere; }
     .sync-button { flex: 0 0 auto; white-space: nowrap; }
-    .sync-button:disabled, .task-form button:disabled { cursor: wait; opacity: .55; }
+    .sync-button:disabled { cursor: not-allowed; opacity: .55; }
+    .task-form button:disabled { cursor: wait; opacity: .55; }
     .my-tasks { margin-top: 12px; padding: 0; list-style: none; }
     .my-task {
       display: grid; grid-template-columns: 22px minmax(0,1fr) auto; align-items: center;
@@ -515,7 +516,9 @@ PAGE_TEMPLATE = r"""<!doctype html>
     }
 
     function updateSyncControls() {
-      syncButton.textContent = currentUser ? "Выйти" : "Подключить Google";
+      syncButton.textContent = !firebaseConfigured
+        ? "Синхронизация не настроена"
+        : (currentUser ? "Выйти" : "Подключить Google");
       syncButton.disabled = !firebaseConfigured || syncLoading;
       addButton.disabled = syncLoading;
       syncAccount.hidden = !currentUser;
@@ -547,6 +550,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
     async function connectFirebase() {
       if (!firebaseConfigured) {
         syncButton.disabled = true;
+        syncButton.textContent = "Синхронизация не настроена";
         setSyncMessage("Сначала добавь параметры Firebase в firebase-config.js. Пока дела сохраняются в этом браузере.");
         return;
       }
