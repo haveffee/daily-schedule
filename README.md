@@ -9,8 +9,9 @@
 Чтобы включить помощника:
 
 1. В Firebase Console открой проект `daily-schedule-sync-fc374` и в разделе **AI Logic** нажми **Get started**. Выбери **Gemini Developer API** и бесплатный уровень без подключения Cloud Billing.
-2. В **App Check** зарегистрируй веб-приложение с провайдером **reCAPTCHA Enterprise** для домена `haveffee.github.io` и включи защиту для **Firebase AI Logic**.
-3. Добавь выданный публичный site key в поле `appCheckSiteKey` файла `firebase-config.js`. Это публичный ключ reCAPTCHA для сайта, не секрет Gemini API key.
+2. Для App Check создай в Google Cloud Console ключ reCAPTCHA Enterprise типа **Web** и укажи домен `haveffee.github.io` (без галочки challenge). Затем в Firebase Console → **App Check** зарегистрируй веб-приложение с этим ключом и включи защиту **Firebase AI Logic**.
+3. Скопируй публичный site key из настроек reCAPTCHA и добавь его в поле `appCheckSiteKey` файла `firebase-config.js`. Это публичный ключ сайта, не секрет Gemini API key.
 4. Сохрани изменения и отправь их в `main`; GitHub Actions обновит Pages.
 
+Gemini Developer API работает на бесплатном уровне без платёжного метода и имеет квоты; reCAPTCHA Enterprise включает до 10 000 оценок в месяц без оплаты. Не подключай Cloud Billing ради помощника.
 Без App Check модель не принимает запросы с опубликованного сайта. Не добавляй в репозиторий приватные API keys, debug tokens или другие секреты.
