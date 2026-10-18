@@ -459,7 +459,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
     </section>
     <footer>Обновлено __UPDATED__ по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
   </main>
-  <script src="./firebase-config.js"></script>
+  <script src="./firebase-config.js?v=fc374"></script>
   <script>
     "use strict";
     const baseEvents = __EVENTS_JSON__;
