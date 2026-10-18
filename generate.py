@@ -993,7 +993,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
               syncLoading = false;
               saveTasks();
               updateSyncControls();
-              setSyncMessage("Синхронизация включена · дела обновляются на всех устройствах.");
+              setSyncMessage("Синхронизация включена · дела, цели и прогресс обновляются на всех устройствах.");
               render();
             }, (error) => {
               if (generation !== syncGeneration) return;
