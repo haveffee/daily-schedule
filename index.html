@@ -102,6 +102,21 @@
     .sync-button { flex: 0 0 auto; white-space: nowrap; }
     .sync-button:disabled { cursor: not-allowed; opacity: .55; }
     .task-form button:disabled { cursor: wait; opacity: .55; }
+    .ai-panel { border-color: rgba(119,82,168,.15); background: linear-gradient(145deg, rgba(119,82,168,.055), rgba(255,255,255,.92) 42%); }
+    .ai-form { display: grid; gap: 12px; }
+    .ai-form textarea {
+      width: 100%; min-height: 112px; resize: vertical; padding: 13px 14px;
+      border: 1px solid #d2d2d7; border-radius: 14px; background: #fff; color: var(--ink);
+      font: inherit; font-size: 15px; line-height: 1.5;
+    }
+    .ai-form textarea:focus { outline: 3px solid rgba(119,82,168,.16); border-color: #7752a8; }
+    .ai-form button { justify-self: start; background: #7752a8; }
+    .ai-form button:disabled { cursor: wait; opacity: .55; }
+    .ai-privacy, .ai-status { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .ai-status { min-height: 18px; }
+    .ai-answer { margin-top: 12px; padding: 16px; border: 1px solid rgba(119,82,168,.14); border-radius: 15px; background: rgba(255,255,255,.8); }
+    .ai-answer[hidden] { display: none; }
+    .ai-answer p { margin: 0; white-space: pre-wrap; font-size: 14px; line-height: 1.6; }
     .my-tasks { margin-top: 12px; padding: 0; list-style: none; }
     .my-task {
       display: grid; grid-template-columns: 22px minmax(0,1fr) auto; align-items: center;
@@ -184,6 +199,7 @@
       .task-form button { grid-column: 1 / -1; }
       .sync-row { align-items: stretch; flex-direction: column; }
       .sync-button { width: 100%; }
+      .ai-form button { width: 100%; }
       .schedule { border-radius: 22px; }
       .schedule-heading { padding: 20px 17px 14px; }
       .task { grid-template-columns: 78px 27px 20px minmax(0,1fr); gap: 8px; padding: 15px 13px; }
@@ -248,6 +264,20 @@
       <p class="message" id="message" aria-live="polite"></p>
       <ul class="my-tasks" id="myTasks"></ul>
     </section>
+    <section class="panel ai-panel" aria-labelledby="ai-title">
+      <p class="section-label">Умный помощник</p>
+      <h2 id="ai-title">Обсуди план на сегодня</h2>
+      <p class="panel-intro">Напиши, что нужно учесть или что тебя беспокоит. Помощник посмотрит на расписание и предложит выполнимый план и следующий шаг.</p>
+      <form class="ai-form" id="aiForm">
+        <label for="aiPrompt">Твой вопрос или заметка
+          <textarea id="aiPrompt" maxlength="1200" placeholder="Например: сегодня мало сил, но нужно подготовиться к математике и разобрать комнату. Как лучше распределить дела?" required></textarea>
+        </label>
+        <button id="aiButton" type="submit" disabled>Спросить помощника</button>
+      </form>
+      <p class="ai-privacy">Для ответа текст вопроса и названия дел на сегодня отправляются в Google Gemini через Firebase. Не вводи пароли, платёжные данные и другую конфиденциальную информацию. Помощник ничего не меняет в расписании без тебя.</p>
+      <p class="ai-status" id="aiStatus" aria-live="polite">Проверяю подключение помощника…</p>
+      <div class="ai-answer" id="aiAnswer" hidden aria-live="polite"><p id="aiAnswerText"></p></div>
+    </section>
     <section class="schedule" aria-labelledby="schedule-title">
       <div class="schedule-heading">
         <h2 id="schedule-title">Расписание дня</h2>
@@ -300,11 +330,11 @@
     <section class="waitlist" id="waitlist" hidden aria-live="polite"></section>
     <section class="focus" aria-labelledby="focus-title">
       <h2 id="focus-title">💡 Фокус дня</h2>
-      <p>Стабильный режим помогает легче включаться в учебу. Постарайся ложиться и вставать примерно в одно время.</p>
+      <p>Выбери три главные задачи дня. Если выполнишь их, день уже продвинет тебя к цели.</p>
     </section>
-    <footer>Обновлено 14:27 по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
+    <footer>Обновлено 14:54 по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
   </main>
-  <script src="./firebase-config.js?v=fc374"></script>
+  <script src="./firebase-config.js?v=fc374-ai1"></script>
   <script>
     "use strict";
     const baseEvents = [{"start": 600, "end": 615, "icon": "☀️", "title": "Подъем", "description": "Спокойное начало выходного дня.", "category": "fixed"}, {"start": 615, "end": 645, "icon": "🥣", "title": "Завтрак", "description": "Позавтракай и подготовься к учебе.", "category": "fixed"}, {"start": 645, "end": 650, "icon": "📖", "title": "Микропривычка недели", "description": "Пять минут чтения: Прочитай пару страниц полезной книги без уведомлений.", "category": "habit"}, {"start": 650, "end": 770, "icon": "📚", "title": "Домашние задания репетиторам", "description": "Выдели время на задания по английскому и математике.", "category": "fixed"}, {"start": 770, "end": 810, "icon": "🍽️", "title": "Обед и отдых", "description": "Перерыв перед второй половиной дня.", "category": "fixed"}];
@@ -323,6 +353,12 @@
     const message = document.getElementById("message");
     const waitlist = document.getElementById("waitlist");
     const form = document.getElementById("taskForm");
+    const aiForm = document.getElementById("aiForm");
+    const aiInput = document.getElementById("aiPrompt");
+    const aiButton = document.getElementById("aiButton");
+    const aiStatus = document.getElementById("aiStatus");
+    const aiAnswer = document.getElementById("aiAnswer");
+    const aiAnswerText = document.getElementById("aiAnswerText");
 
     function readTasks(key = storageKey) {
       try {
@@ -367,6 +403,10 @@
     );
     let firebaseApi = null;
     let firebaseAuth = null;
+    let firebaseApp = null;
+    let firebaseAppCheckReady = false;
+    let aiModel = null;
+    let aiRequestInProgress = false;
     let currentUser = null;
     let cloudReady = false;
     let syncLoading = false;
@@ -376,6 +416,49 @@
     function setSyncMessage(text, isError = false) {
       syncStatus.textContent = text;
       syncStatus.style.color = isError ? "#b42318" : "";
+    }
+
+    function setAiMessage(text, isError = false) {
+      aiStatus.textContent = text;
+      aiStatus.style.color = isError ? "#b42318" : "";
+    }
+
+    async function initializeAiAssistant(user) {
+      if (!firebaseConfig.appCheckSiteKey || !firebaseAppCheckReady) {
+        aiButton.disabled = true;
+        setAiMessage("Чтобы включить помощника, настрой Firebase AI Logic и App Check для сайта, затем добавь публичный reCAPTCHA Enterprise site key в firebase-config.js.");
+        return;
+      }
+      if (!user) {
+        aiButton.disabled = true;
+        setAiMessage("Войди через Google выше, чтобы пользоваться помощником.");
+        return;
+      }
+      if (aiModel) {
+        aiButton.disabled = false;
+        setAiMessage("Помощник подключен. Можно задать вопрос о сегодняшнем плане.");
+        return;
+      }
+
+      aiButton.disabled = true;
+      setAiMessage("Подключаю помощника…");
+      try {
+        const aiModule = await import("https://www.gstatic.com/firebasejs/13.0.0/firebase-ai.js");
+        const ai = aiModule.getAI(firebaseApp, { backend: new aiModule.GoogleAIBackend() });
+        const model = aiModule.getGenerativeModel(ai, {
+          model: "gemini-3.5-flash",
+          generationConfig: { temperature: 0.35, maxOutputTokens: 600 },
+        });
+        if (currentUser?.uid !== user.uid) return;
+        aiModel = model;
+        aiButton.disabled = false;
+        setAiMessage("Помощник подключен. Можно задать вопрос о сегодняшнем плане.");
+      } catch (error) {
+        aiModel = null;
+        aiButton.disabled = true;
+        setAiMessage("Не удалось подключить ИИ. Проверь Firebase AI Logic в настройках проекта.", true);
+        console.error("Firebase AI Logic initialization error:", error);
+      }
     }
 
     function updateSyncControls() {
@@ -430,6 +513,8 @@
         syncButton.disabled = true;
         syncButton.textContent = "Синхронизация не настроена";
         setSyncMessage("Сначала добавь параметры Firebase в firebase-config.js. Пока дела сохраняются в этом браузере.");
+        aiButton.disabled = true;
+        setAiMessage("ИИ-помощник использует существующий проект Firebase. Сначала подключи его параметры в firebase-config.js.");
         return;
       }
 
@@ -439,11 +524,26 @@
           import("https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js"),
           import("https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js"),
         ]);
-        const app = appModule.initializeApp(firebaseConfig);
-        firebaseAuth = authModule.getAuth(app);
+        firebaseApp = appModule.initializeApp(firebaseConfig);
+        if (firebaseConfig.appCheckSiteKey) {
+          try {
+            const appCheckModule = await import("https://www.gstatic.com/firebasejs/13.0.0/firebase-app-check.js");
+            appCheckModule.initializeAppCheck(firebaseApp, {
+              provider: new appCheckModule.ReCaptchaEnterpriseProvider(firebaseConfig.appCheckSiteKey),
+              isTokenAutoRefreshEnabled: true,
+            });
+            firebaseAppCheckReady = true;
+          } catch (error) {
+            setAiMessage("Не удалось инициализировать App Check. Проверь reCAPTCHA Enterprise site key.", true);
+            console.error("Firebase App Check initialization error:", error);
+          }
+        } else {
+          setAiMessage("Для ИИ включи Firebase AI Logic и App Check в Firebase Console, затем добавь reCAPTCHA Enterprise site key в firebase-config.js.");
+        }
+        firebaseAuth = authModule.getAuth(firebaseApp);
         firebaseApi = {
           ...storeModule,
-          db: storeModule.getFirestore(app),
+          db: storeModule.getFirestore(firebaseApp),
           auth: authModule,
         };
         await authModule.setPersistence(firebaseAuth, authModule.browserLocalPersistence);
@@ -458,6 +558,9 @@
           updateSyncControls();
 
           if (!user) {
+            aiModel = null;
+            aiButton.disabled = true;
+            void initializeAiAssistant(null);
             storageKey = localStorageKey;
             userTasks = readTasks(localStorageKey);
             completionStorageKey = localCompletionStorageKey;
@@ -466,6 +569,8 @@
             setSyncMessage("Пока дела доступны только в этом браузере. Войди в тот же Google-аккаунт на втором устройстве.");
             return;
           }
+
+          void initializeAiAssistant(user);
 
           setSyncMessage("Подключаю общий список дел…");
           const accountStorageKey = localStorageKey + "-user-" + user.uid;
@@ -886,6 +991,74 @@
         form.reset();
         form.elements.duration.value = "30";
         render();
+      }
+    });
+
+    aiForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const question = aiInput.value.trim();
+      if (!question || question.length > 1200 || aiRequestInProgress) return;
+      if (!currentUser) {
+        setAiMessage("Сначала войди через Google в блоке синхронизации.", true);
+        return;
+      }
+      if (!firebaseAppCheckReady || !aiModel) {
+        setAiMessage("Помощник ещё не настроен. Включи Firebase AI Logic и App Check в Firebase Console.", true);
+        return;
+      }
+
+      const usageKey = "daily-schedule-ai-requests-" + dateKey + "-" + currentUser.uid;
+      let requestCount = 0;
+      try {
+        requestCount = Number(localStorage.getItem(usageKey) || "0");
+        if (!Number.isFinite(requestCount)) requestCount = 0;
+      } catch (error) {
+        requestCount = 0;
+      }
+      if (requestCount >= 8) {
+        setAiMessage("На сегодня хватит 8 вопросов с этого устройства. Продолжим завтра.", true);
+        return;
+      }
+
+      const fixedPlan = baseEvents.map((item) => ({
+        time: timeLabel(item.start) + "–" + timeLabel(item.end),
+        title: item.title,
+        completed: Boolean(completedScheduleItems[scheduleCompletionId(item)]),
+      }));
+      const addedTasks = userTasks.map((task) => ({
+        title: task.title,
+        durationMinutes: task.duration,
+        preferredStart: task.time || "не задано",
+        completed: Boolean(task.done),
+      }));
+      const prompt = `Ты — доброжелательный помощник по планированию дня. Отвечай по-русски, коротко и конкретно. Учитывай, что главная долгосрочная цель пользователя — подготовка к ЦЭ/ЦТ для поступления в университет. Не переноси фиксированные дела. Если план перегружен, честно скажи об этом и предложи один реалистичный следующий шаг. Не придумывай свободное время, если его нет. Не меняй данные и не заявляй, что добавил задачи.\n\nДата по Москве: ${dateKey}.\nФиксированное расписание: ${JSON.stringify(fixedPlan)}\nДополнительные дела пользователя: ${JSON.stringify(addedTasks)}\n\nСообщение пользователя: ${question}`;
+
+      aiRequestInProgress = true;
+      aiButton.disabled = true;
+      aiButton.textContent = "Думаю…";
+      aiAnswer.hidden = true;
+      setAiMessage("Подбираю понятный и выполнимый вариант…");
+      try {
+        const result = await aiModel.generateContent(prompt);
+        const answer = result.response.text().trim();
+        if (!answer) throw new Error("empty-response");
+        try { localStorage.setItem(usageKey, String(requestCount + 1)); } catch (error) { /* The reply can still be shown. */ }
+        aiAnswerText.textContent = answer;
+        aiAnswer.hidden = false;
+        setAiMessage("Готово. Если совет подходит, добавь дело в планировщик выше.");
+      } catch (error) {
+        const code = String(error?.code || "").toLowerCase();
+        const detail = code.includes("resource-exhausted")
+          ? "Достигнут временный лимит бесплатных запросов. Попробуй позже."
+          : code.includes("permission-denied") || code.includes("app-check")
+            ? "Firebase не принял App Check. Проверь reCAPTCHA Enterprise site key и регистрацию сайта."
+            : "Не получилось получить ответ. Проверь подключение и настройки Firebase AI Logic.";
+        setAiMessage(detail, true);
+        console.error("Firebase AI Logic request error:", error);
+      } finally {
+        aiRequestInProgress = false;
+        aiButton.disabled = !currentUser || !firebaseAppCheckReady || !aiModel;
+        aiButton.textContent = "Спросить помощника";
       }
     });
 
