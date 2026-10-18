@@ -653,9 +653,19 @@ PAGE_TEMPLATE = r"""<!doctype html>
               await authModule.signInWithPopup(firebaseAuth, new authModule.GoogleAuthProvider());
             }
           } catch (error) {
-            const text = error.code === "auth/popup-blocked"
-              ? "Браузер заблокировал окно входа. Разреши всплывающие окна и попробуй ещё раз."
-              : "Не получилось войти через Google. Проверь настройки провайдера в Firebase.";
+            const messages = {
+              "auth/popup-blocked": "Safari заблокировал окно Google. Разреши всплывающие окна или открой сайт в обычном Safari.",
+              "auth/popup-closed-by-user": "Окно Google закрылось до завершения входа. Нажми «Подключить Google» и закончи вход.",
+              "auth/cancelled-popup-request": "Запрос входа был прерван другим окном. Подожди немного и попробуй ещё раз.",
+              "auth/unauthorized-domain": "Firebase не разрешает этот адрес сайта. В Firebase → Authentication → Settings → Authorized domains добавь haveffee.github.io.",
+              "auth/operation-not-allowed": "В Firebase выключен вход через Google. В Authentication → Sign-in method включи провайдер Google.",
+              "auth/network-request-failed": "Не удалось связаться с Google. Проверь интернет, VPN и блокировщики контента.",
+              "auth/web-storage-unsupported": "Safari не разрешил хранилище для входа. Попробуй обычную вкладку Safari, не приватный режим.",
+              "auth/operation-not-supported-in-this-environment": "Этот способ входа не поддерживается текущим окном. Открой сайт непосредственно в Safari.",
+              "auth/invalid-api-key": "Firebase отклонил ключ приложения. Проверь конфигурацию Firebase сайта.",
+            };
+            const text = messages[error.code]
+              || `Вход через Google не выполнен (${error.code || "неизвестный код"}). Открой сайт в Safari и пришли этот код.`;
             setSyncMessage(text, true);
             console.error("Firebase authentication error:", error);
           }
