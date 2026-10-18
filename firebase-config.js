@@ -4,8 +4,8 @@
  * Это не секретные ключи. Доступ к пользовательским данным ограничивают firestore.rules.
  */
 window.SCHEDULE_FIREBASE_CONFIG = Object.freeze({
-  apiKey: "REPLACE_WITH_FIREBASE_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  appId: "REPLACE_WITH_FIREBASE_APP_ID",
+  apiKey: "AIzaSyCHGaFPaOAGat0-g86hH_elG5ZJVf5CVsg",
+  authDomain: "daily-schedule-sync-fc374.firebaseapp.com",
+  projectId: "daily-schedule-sync-fc374",
+  appId: "1:542549006139:web:568f06cc49bd514625891e",
 });
