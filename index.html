@@ -90,6 +90,17 @@
     button:focus-visible, input:focus-visible { outline: 3px solid rgba(0,113,227,.24); outline-offset: 2px; }
     .storage-note, .message { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
     .message { min-height: 17px; color: var(--green); }
+    .sync-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 14px;
+      margin-top: 18px; padding: 15px 16px; border: 1px solid var(--line);
+      border-radius: 16px; background: rgba(245,245,247,.65);
+    }
+    .sync-copy { min-width: 0; }
+    .sync-copy strong { display: block; font-size: 14px; }
+    .sync-copy p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .sync-status { overflow-wrap: anywhere; }
+    .sync-button { flex: 0 0 auto; white-space: nowrap; }
+    .sync-button:disabled, .task-form button:disabled { cursor: wait; opacity: .55; }
     .my-tasks { margin-top: 12px; padding: 0; list-style: none; }
     .my-task {
       display: grid; grid-template-columns: 22px minmax(0,1fr) auto; align-items: center;
@@ -148,6 +159,8 @@
       .task-form { grid-template-columns: 1fr 1fr; }
       .task-form label:first-child { grid-column: 1 / -1; }
       .task-form button { grid-column: 1 / -1; }
+      .sync-row { align-items: stretch; flex-direction: column; }
+      .sync-button { width: 100%; }
       .schedule { border-radius: 22px; }
       .schedule-heading { padding: 20px 17px 14px; }
       .task { grid-template-columns: 78px 27px minmax(0,1fr); gap: 8px; padding: 15px 13px; }
@@ -199,7 +212,15 @@
         </label>
         <button type="submit">Добавить дело</button>
       </form>
-      <p class="storage-note">Без времени дело поставится в ближайшее свободное окно. Если окно занято — поиск продолжится позже. Дела и отметки хранятся в этом браузере на этом устройстве и не синхронизируются между устройствами.</p>
+      <div class="sync-row" aria-label="Синхронизация между устройствами">
+        <div class="sync-copy">
+          <strong>Синхронизация между устройствами</strong>
+          <p class="sync-status" id="syncStatus" aria-live="polite">Проверяю настройки синхронизации…</p>
+          <p id="syncAccount" hidden></p>
+        </div>
+        <button class="sync-button" id="syncButton" type="button">Подключить Google</button>
+      </div>
+      <p class="storage-note">Без времени дело поставится в ближайшее свободное окно. Если окно занято — поиск продолжится позже. Для общего списка войди в один Google-аккаунт на компьютере и iPhone.</p>
       <p class="message" id="message" aria-live="polite"></p>
       <ul class="my-tasks" id="myTasks"></ul>
     </section>
@@ -254,10 +275,11 @@
     <section class="waitlist" id="waitlist" hidden aria-live="polite"></section>
     <section class="focus" aria-labelledby="focus-title">
       <h2 id="focus-title">💡 Фокус дня</h2>
-      <p>В конце дня спокойно оцени невыполненные задачи: перенеси важные на конкретное время, а лишние убери из списка.</p>
+      <p>Выбери три главные задачи дня. Если выполнишь их, день уже продвинет тебя к цели.</p>
     </section>
-    <footer>Обновлено 13:24 по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
+    <footer>Обновлено 13:39 по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
   </main>
+  <script src="./firebase-config.js"></script>
   <script>
     "use strict";
     const baseEvents = [{"start": 600, "end": 615, "icon": "☀️", "title": "Подъем", "description": "Спокойное начало выходного дня.", "category": "fixed"}, {"start": 615, "end": 645, "icon": "🥣", "title": "Завтрак", "description": "Позавтракай и подготовься к учебе.", "category": "fixed"}, {"start": 645, "end": 650, "icon": "📖", "title": "Микропривычка недели", "description": "Пять минут чтения: Прочитай пару страниц полезной книги без уведомлений.", "category": "habit"}, {"start": 650, "end": 770, "icon": "📚", "title": "Домашние задания репетиторам", "description": "Выдели время на задания по английскому и математике.", "category": "fixed"}, {"start": 770, "end": 810, "icon": "🍽️", "title": "Обед и отдых", "description": "Перерыв перед второй половиной дня.", "category": "fixed"}];
@@ -265,16 +287,18 @@
     const dayStart = 600;
     const flexStart = 810;
     const dayEnd = 1320;
-    const storageKey = "daily-schedule-" + dateKey;
+    const localStorageKey = "daily-schedule-" + dateKey;
+    const migrationKey = localStorageKey + "-cloud-migrated";
+    let storageKey = localStorageKey;
     const timeline = document.getElementById("timeline");
     const taskList = document.getElementById("myTasks");
     const message = document.getElementById("message");
     const waitlist = document.getElementById("waitlist");
     const form = document.getElementById("taskForm");
 
-    function readTasks() {
+    function readTasks(key = storageKey) {
       try {
-        const saved = localStorage.getItem(storageKey);
+        const saved = localStorage.getItem(key);
         const parsed = saved ? JSON.parse(saved) : [];
         return Array.isArray(parsed) ? parsed.filter((task) =>
           task && typeof task.id === "string" && typeof task.title === "string"
@@ -286,6 +310,179 @@
     }
 
     let userTasks = readTasks();
+
+    const syncButton = document.getElementById("syncButton");
+    const syncStatus = document.getElementById("syncStatus");
+    const syncAccount = document.getElementById("syncAccount");
+    const addButton = form.querySelector('button[type="submit"]');
+    const firebaseConfig = window.SCHEDULE_FIREBASE_CONFIG || {};
+    const firebaseConfigured = Boolean(
+      firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("REPLACE_") &&
+      firebaseConfig.authDomain && !firebaseConfig.authDomain.includes("YOUR_PROJECT_ID") &&
+      firebaseConfig.projectId && !firebaseConfig.projectId.includes("YOUR_PROJECT_ID") &&
+      firebaseConfig.appId && !firebaseConfig.appId.startsWith("REPLACE_")
+    );
+    let firebaseApi = null;
+    let firebaseAuth = null;
+    let currentUser = null;
+    let cloudReady = false;
+    let syncLoading = false;
+    let stopCloudListener = null;
+    let syncGeneration = 0;
+
+    function setSyncMessage(text, isError = false) {
+      syncStatus.textContent = text;
+      syncStatus.style.color = isError ? "#b42318" : "";
+    }
+
+    function updateSyncControls() {
+      syncButton.textContent = currentUser ? "Выйти" : "Подключить Google";
+      syncButton.disabled = !firebaseConfigured || syncLoading;
+      addButton.disabled = syncLoading;
+      syncAccount.hidden = !currentUser;
+      syncAccount.textContent = currentUser ? (currentUser.email || "Вход через Google") : "";
+    }
+
+    function validTask(task) {
+      return task && typeof task.id === "string" && typeof task.title === "string" &&
+        typeof task.duration === "number" && task.duration >= 5 && task.duration <= 480;
+    }
+
+    function taskCollection(userId) {
+      return firebaseApi.collection(
+        firebaseApi.db, "users", userId, "days", dateKey, "tasks"
+      );
+    }
+
+    function cloudTaskData(task, includeCreatedAt = false) {
+      const data = {
+        title: task.title.slice(0, 100),
+        duration: Math.round(task.duration),
+        time: /^([01]\d|2[0-3]):[0-5]\d$/.test(task.time || "") ? task.time : "",
+        done: Boolean(task.done),
+      };
+      if (includeCreatedAt) data.createdAt = firebaseApi.serverTimestamp();
+      return data;
+    }
+
+    async function connectFirebase() {
+      if (!firebaseConfigured) {
+        syncButton.disabled = true;
+        setSyncMessage("Сначала добавь параметры Firebase в firebase-config.js. Пока дела сохраняются в этом браузере.");
+        return;
+      }
+
+      try {
+        const [appModule, authModule, storeModule] = await Promise.all([
+          import("https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js"),
+          import("https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js"),
+          import("https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js"),
+        ]);
+        const app = appModule.initializeApp(firebaseConfig);
+        firebaseAuth = authModule.getAuth(app);
+        firebaseApi = {
+          ...storeModule,
+          db: storeModule.getFirestore(app),
+          auth: authModule,
+        };
+        await authModule.setPersistence(firebaseAuth, authModule.browserLocalPersistence);
+
+        authModule.onAuthStateChanged(firebaseAuth, async (user) => {
+          const generation = ++syncGeneration;
+          currentUser = user;
+          cloudReady = false;
+          syncLoading = Boolean(user);
+          if (stopCloudListener) stopCloudListener();
+          stopCloudListener = null;
+          updateSyncControls();
+
+          if (!user) {
+            storageKey = localStorageKey;
+            userTasks = readTasks(localStorageKey);
+            render();
+            setSyncMessage("Пока дела доступны только в этом браузере. Войди в тот же Google-аккаунт на втором устройстве.");
+            return;
+          }
+
+          setSyncMessage("Подключаю общий список дел…");
+          const accountStorageKey = localStorageKey + "-user-" + user.uid;
+          const hasAccountCache = localStorage.getItem(accountStorageKey) !== null;
+          const migrationDone = localStorage.getItem(migrationKey) === "yes";
+          const localTasks = hasAccountCache
+            ? readTasks(accountStorageKey)
+            : (migrationDone ? [] : readTasks(localStorageKey));
+          storageKey = accountStorageKey;
+          userTasks = localTasks;
+          saveTasks();
+          render();
+
+          try {
+            const collectionRef = taskCollection(user.uid);
+            const firstSnapshot = await firebaseApi.getDocs(collectionRef);
+            if (generation !== syncGeneration) return;
+            const remoteIds = new Set(firstSnapshot.docs.map((item) => item.id));
+            for (const task of localTasks.filter(validTask)) {
+              if (!remoteIds.has(task.id)) {
+                await firebaseApi.setDoc(
+                  firebaseApi.doc(collectionRef, task.id), cloudTaskData(task, true)
+                );
+              }
+            }
+            if (!migrationDone) localStorage.setItem(migrationKey, "yes");
+
+            stopCloudListener = firebaseApi.onSnapshot(collectionRef, (snapshot) => {
+              if (generation !== syncGeneration) return;
+              userTasks = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))
+                .filter(validTask)
+                .sort((a, b) => {
+                  const aTime = a.createdAt && typeof a.createdAt.toMillis === "function" ? a.createdAt.toMillis() : 0;
+                  const bTime = b.createdAt && typeof b.createdAt.toMillis === "function" ? b.createdAt.toMillis() : 0;
+                  return aTime - bTime;
+                });
+              cloudReady = true;
+              syncLoading = false;
+              saveTasks();
+              updateSyncControls();
+              setSyncMessage("Синхронизация включена · дела обновляются на всех устройствах.");
+              render();
+            }, (error) => {
+              if (generation !== syncGeneration) return;
+              cloudReady = false;
+              syncLoading = false;
+              updateSyncControls();
+              setSyncMessage("Не удалось прочитать общий список. Проверь правила Firestore и интернет.", true);
+              console.error("Firestore listener error:", error);
+            });
+          } catch (error) {
+            if (generation !== syncGeneration) return;
+            syncLoading = false;
+            updateSyncControls();
+            setSyncMessage("Не удалось подключить Firestore. Проверь настройки Firebase и правила доступа.", true);
+            console.error("Firestore initialization error:", error);
+          }
+        });
+
+        syncButton.addEventListener("click", async () => {
+          try {
+            if (currentUser) {
+              await authModule.signOut(firebaseAuth);
+            } else {
+              await authModule.signInWithPopup(firebaseAuth, new authModule.GoogleAuthProvider());
+            }
+          } catch (error) {
+            const text = error.code === "auth/popup-blocked"
+              ? "Браузер заблокировал окно входа. Разреши всплывающие окна и попробуй ещё раз."
+              : "Не получилось войти через Google. Проверь настройки провайдера в Firebase.";
+            setSyncMessage(text, true);
+            console.error("Firebase authentication error:", error);
+          }
+        });
+      } catch (error) {
+        syncButton.disabled = true;
+        setSyncMessage("Не удалось загрузить Firebase. Проверь подключение к интернету.", true);
+        console.error("Firebase SDK loading error:", error);
+      }
+    }
 
     function saveTasks() {
       try {
@@ -362,6 +559,14 @@
         checkbox.addEventListener("change", () => {
           task.done = checkbox.checked;
           saveTasks();
+          if (currentUser && cloudReady) {
+            firebaseApi.updateDoc(
+              firebaseApi.doc(taskCollection(currentUser.uid), task.id), { done: task.done }
+            ).catch((error) => {
+              setSyncMessage("Изменение сохранено на устройстве, но не удалось отправить его в облако.", true);
+              console.error("Firestore update error:", error);
+            });
+          }
           render();
         });
         const copy = document.createElement("span");
@@ -385,6 +590,13 @@
         remove.addEventListener("click", () => {
           userTasks = userTasks.filter((item) => item.id !== task.id);
           saveTasks();
+          if (currentUser && cloudReady) {
+            firebaseApi.deleteDoc(firebaseApi.doc(taskCollection(currentUser.uid), task.id))
+              .catch((error) => {
+                setSyncMessage("Не удалось удалить дело из облака. Проверь подключение.", true);
+                console.error("Firestore delete error:", error);
+              });
+          }
           message.textContent = "Дело удалено.";
           render();
         });
@@ -480,15 +692,24 @@
       const duration = Number(data.get("duration"));
       const time = String(data.get("time") || "");
       if (!title || !Number.isFinite(duration) || duration < 5 || duration > 480) return;
-      userTasks.push({
+      const task = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
         title,
         duration,
         time,
         done: false,
-      });
+      };
+      userTasks.push(task);
       if (saveTasks()) {
         message.textContent = "Дело добавлено и расписание пересчитано.";
+        if (currentUser && cloudReady) {
+          firebaseApi.setDoc(
+            firebaseApi.doc(taskCollection(currentUser.uid), task.id), cloudTaskData(task, true)
+          ).catch((error) => {
+            setSyncMessage("Дело сохранено на устройстве, но пока не отправлено в облако.", true);
+            console.error("Firestore create error:", error);
+          });
+        }
         form.reset();
         form.elements.duration.value = "30";
         render();
@@ -496,6 +717,7 @@
     });
 
     render();
+    void connectFirebase();
   </script>
 </body>
 </html>

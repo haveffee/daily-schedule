@@ -1,6 +1,9 @@
 name: Update daily schedule
 
 on:
+  push:
+    paths-ignore:
+      - index.html
   schedule:
     - cron: "20 4 * * *"
   workflow_dispatch:

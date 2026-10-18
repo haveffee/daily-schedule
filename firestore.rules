@@ -1,0 +1,35 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function ownsData(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function validTask() {
+      return request.resource.data.keys().hasAll([
+          'title', 'duration', 'time', 'done', 'createdAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'title', 'duration', 'time', 'done', 'createdAt'
+        ])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 100
+        && request.resource.data.duration is int
+        && request.resource.data.duration >= 5
+        && request.resource.data.duration <= 480
+        && request.resource.data.time is string
+        && (request.resource.data.time == ''
+          || request.resource.data.time.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))
+        && request.resource.data.done is bool
+        && request.resource.data.createdAt is timestamp;
+    }
+
+    match /users/{userId}/days/{dayId}/tasks/{taskId} {
+      allow read: if ownsData(userId);
+      allow create, update: if ownsData(userId) && validTask();
+      allow delete: if ownsData(userId);
+    }
+  }
+}
