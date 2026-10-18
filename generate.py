@@ -1,7 +1,7 @@
 """Создает адаптивное расписание на текущий день по московскому времени."""
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 from random import choice
@@ -47,6 +47,23 @@ FOCUS_TIPS = (
     "В конце дня спокойно оцени невыполненные задачи: перенеси важные на конкретное время, а лишние убери из списка.",
 )
 
+WEEKLY_HABITS = (
+    ("📝", "План из трех приоритетов", "Запиши три главные задачи: учеба, обязательное дело и забота о себе."),
+    ("🧠", "Активное вспоминание", "Пять минут вспомни одну тему ЦЭ/ЦТ без конспекта, затем проверь себя."),
+    ("🇬🇧", "Пять английских слов", "Повтори пять слов и составь с одним из них короткое предложение."),
+    ("📐", "Один шаг по математике", "Реши один небольшой пример или восстанови формулу по памяти."),
+    ("📖", "Пять минут чтения", "Прочитай пару страниц полезной книги без уведомлений."),
+    ("🧹", "Пять минут порядка", "Приведи в порядок рабочее место или убери одну небольшую вещь."),
+    ("🎒", "Подготовить нужное заранее", "Проверь, что нужные материалы и вещи готовы к сегодняшним делам."),
+    ("🌿", "Спокойное начало дня", "Сделай несколько медленных вдохов и выбери, с чего начнешь день."),
+    ("✍️", "Короткая запись", "Запиши одну мысль или вопрос, который хочешь прояснить сегодня."),
+    ("🔕", "Первые пять минут без телефона", "Начни день без ленты и уведомлений; сразу перейди к утреннему плану."),
+    ("✅", "Сначала маленький шаг", "Начни одну важную задачу с самого простого действия на пять минут."),
+    ("🌙", "Итог и следующий шаг", "Вспомни один сделанный шаг и выбери первый шаг на завтра."),
+)
+
+HABIT_EPOCH = date(2026, 1, 5)  # понедельник; привычка меняется раз в неделю
+
 
 def minutes(time_label: str) -> int:
     """Преобразует время HH:MM в количество минут от начала суток."""
@@ -72,9 +89,19 @@ def make_event(
     }
 
 
-def build_schedule(day_index: int) -> tuple[list[dict[str, int | str]], bool, int, int, int]:
+def habit_for_week(current_date: date) -> tuple[str, str, str]:
+    """Выбирает одну небольшую привычку, одинаковую на протяжении всей недели."""
+    week_index = max(0, (current_date - HABIT_EPOCH).days // 7)
+    return WEEKLY_HABITS[week_index % len(WEEKLY_HABITS)]
+
+
+def build_schedule(
+    day_index: int,
+    weekly_habit: tuple[str, str, str],
+) -> tuple[list[dict[str, int | str]], bool, int, int, int]:
     """Возвращает фиксированные события, границы дня и начало гибкого времени."""
     is_weekday = day_index < 5
+    habit_icon, habit_title, habit_description = weekly_habit
 
     if not is_weekday:
         events = [
@@ -82,19 +109,35 @@ def build_schedule(day_index: int) -> tuple[list[dict[str, int | str]], bool, in
             make_event("10:15", "10:45", "🥣", "Завтрак", "Позавтракай и подготовься к учебе."),
             make_event(
                 "10:45",
-                "12:45",
+                "10:50",
+                habit_icon,
+                "Микропривычка недели",
+                f"{habit_title}: {habit_description}",
+                "habit",
+            ),
+            make_event(
+                "10:50",
+                "12:50",
                 "📚",
                 "Домашние задания репетиторам",
                 "Выдели время на задания по английскому и математике.",
             ),
-            make_event("12:45", "13:30", "🍽️", "Обед и отдых", "Перерыв перед второй половиной дня."),
+            make_event("12:50", "13:30", "🍽️", "Обед и отдых", "Перерыв перед второй половиной дня."),
         ]
         return events, False, minutes("10:00"), minutes("13:30"), minutes("22:00")
 
     events = [
         make_event("07:20", "07:30", "☀️", "Подъем", "Начни день без спешки."),
         make_event("07:30", "07:45", "🥣", "Завтрак", "Завтрак перед дорогой."),
-        make_event("07:45", "08:00", "🎒", "Сборы", "Подготовься к выходу."),
+        make_event(
+            "07:45",
+            "07:50",
+            habit_icon,
+            "Микропривычка недели",
+            f"{habit_title}: {habit_description}",
+            "habit",
+        ),
+        make_event("07:50", "08:00", "🎒", "Сборы", "Подготовься к выходу."),
         make_event("08:00", "08:06", "🚶", "Дорога до остановки", "Выйди к автобусу заранее."),
         make_event("08:06", "09:00", "🚌", "Автобус и дорога", "Автобус отправляется в 08:06."),
         make_event("09:00", "17:00", "🛍️", "Работа продавцом", "Рабочий день."),
@@ -145,8 +188,9 @@ def render_static_event(event: dict[str, int | str]) -> str:
     """HTML-версия базового расписания для отображения до запуска JavaScript."""
     start = int(event["start"])
     end = int(event["end"])
+    task_class = " task--habit" if event["category"] == "habit" else ""
     time_label = f"{start // 60:02d}:{start % 60:02d}–{end // 60:02d}:{end % 60:02d}"
-    return f"""<article class="task">
+    return f"""<article class="task{task_class}">
       <time class="task-time">{escape(time_label)}</time>
       <div class="task-icon" aria-hidden="true">{escape(str(event["icon"]))}</div>
       <div class="task-copy">
@@ -166,6 +210,8 @@ PAGE_TEMPLATE = r"""<!doctype html>
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Твой план">
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
   <title>Расписание на __DATE__</title>
   <style>
     :root {
@@ -219,6 +265,14 @@ PAGE_TEMPLATE = r"""<!doctype html>
       letter-spacing: .07em; text-transform: uppercase;
     }
     .goal p:last-child { margin: 0; font-size: 16px; line-height: 1.5; }
+    .habit-banner {
+      display: grid; gap: 5px; margin: 0 0 22px; padding: 16px 20px;
+      border: 1px solid rgba(119,82,168,.13); border-radius: 18px;
+      background: linear-gradient(120deg, rgba(119,82,168,.09), rgba(255,255,255,.86));
+    }
+    .habit-banner strong { color: #7752a8; font-size: 14px; }
+    .habit-banner span { color: var(--muted); font-size: 12px; }
+    .habit-banner p { margin: 2px 0 0; font-size: 15px; line-height: 1.45; }
     .panel { background: var(--surface); border-color: rgba(29,29,31,.06); }
     .panel h2, .schedule-heading h2 { margin: 0; font-size: 20px; letter-spacing: -.025em; }
     .panel-intro { margin: 7px 0 17px; color: var(--muted); font-size: 14px; line-height: 1.45; }
@@ -270,6 +324,8 @@ PAGE_TEMPLATE = r"""<!doctype html>
     .task-copy p { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
     .task--personal .task-time { color: var(--green); }
     .task--custom .task-time { color: #8a4baf; }
+    .task--habit { background: linear-gradient(90deg, rgba(0,113,227,.035), transparent 75%); }
+    .task--habit .task-time { color: #7752a8; }
     .task--done { opacity: .58; }
     .task--done h3 { text-decoration: line-through; }
     .waitlist {
@@ -290,7 +346,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
       .topline { margin-bottom: 26px; font-size: 12px; }
       .timezone { padding: 7px 9px; }
       .date { font-size: 16px; }
-      .goal, .panel { padding: 18px; border-radius: 19px; }
+      .goal, .panel, .habit-banner { padding: 18px; border-radius: 19px; }
       .task-form { grid-template-columns: 1fr 1fr; }
       .task-form label:first-child { grid-column: 1 / -1; }
       .task-form button { grid-column: 1 / -1; }
@@ -323,6 +379,11 @@ PAGE_TEMPLATE = r"""<!doctype html>
     <section class="goal" aria-label="Главная цель">
       <p class="goal-label">Цель на ближайшие 8 месяцев</p>
       <p>Подготовка к ЦЭ/ЦТ для поступления в университет. Каждый учебный шаг приближает к цели.</p>
+    </section>
+    <section class="habit-banner" aria-label="Привычка недели">
+      <strong>Небольшой шаг этой недели</strong>
+      <span>Одна полезная привычка · 5 минут в день</span>
+      <p>__HABIT_TITLE__</p>
     </section>
     <section class="panel" aria-labelledby="custom-title">
       <p class="section-label">Планировщик</p>
@@ -553,6 +614,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
         const classes = [];
         if (item.category === "personal") classes.push("task--personal");
         if (item.category === "custom") classes.push("task--custom");
+        if (item.category === "habit") classes.push("task--habit");
         if (item.done) classes.push("task--done");
         addCard(timeline, item, item.start, item.end, classes.join(" "));
       }
@@ -609,14 +671,16 @@ def main() -> None:
     weekday = WEEKDAYS[day_index]
     date_label = f"{now.day} {MONTHS[now.month - 1]} {now.year}"
     date_iso = now.date().isoformat()
-    events, is_weekday, day_start, flex_start, day_end = build_schedule(day_index)
+    weekly_habit = habit_for_week(now.date())
+    events, is_weekday, day_start, flex_start, day_end = build_schedule(day_index, weekly_habit)
     day_type = "Будний день" if is_weekday else "Выходной день"
+    habit_title = escape(weekly_habit[1])
     focus_tip = escape(choice(FOCUS_TIPS))
     static_tasks = "\n".join(render_static_event(event) for event in events)
     events_json = json.dumps(events, ensure_ascii=False).replace("<", "\\u003c")
 
     # f-строка подставляет актуальную дату, день недели и список дел.
-    page = f"{PAGE_TEMPLATE.replace('__DATE__', escape(date_label)).replace('__DATE_ISO__', date_iso).replace('__WEEKDAY__', escape(weekday.capitalize())).replace('__DAY_TYPE__', escape(day_type)).replace('__STATIC_TASKS__', static_tasks).replace('__EVENTS_JSON__', events_json).replace('__DAY_START__', str(day_start)).replace('__FLEX_START__', str(flex_start)).replace('__DAY_END__', str(day_end)).replace('__FOCUS_TIP__', focus_tip).replace('__UPDATED__', now.strftime('%H:%M'))}"
+    page = f"{PAGE_TEMPLATE.replace('__DATE__', escape(date_label)).replace('__DATE_ISO__', date_iso).replace('__WEEKDAY__', escape(weekday.capitalize())).replace('__DAY_TYPE__', escape(day_type)).replace('__STATIC_TASKS__', static_tasks).replace('__EVENTS_JSON__', events_json).replace('__DAY_START__', str(day_start)).replace('__FLEX_START__', str(flex_start)).replace('__DAY_END__', str(day_end)).replace('__HABIT_TITLE__', habit_title).replace('__FOCUS_TIP__', focus_tip).replace('__UPDATED__', now.strftime('%H:%M'))}"
 
     output_path = Path(__file__).with_name("index.html")
     output_path.write_text(page, encoding="utf-8")
