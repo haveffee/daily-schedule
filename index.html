@@ -124,12 +124,18 @@
       padding: 22px 26px 16px;
     }
     .schedule-heading span { color: var(--muted); font-size: 13px; }
+    .completion-note { margin: 0; padding: 0 26px 13px; color: var(--muted); font-size: 12px; line-height: 1.4; }
     .task {
-      display: grid; grid-template-columns: 112px 38px minmax(0,1fr); align-items: start;
+      display: grid; grid-template-columns: 112px 38px 22px minmax(0,1fr); align-items: start;
       gap: 13px; padding: 17px 26px; border-top: 1px solid var(--line);
     }
     .task-time { padding-top: 2px; color: var(--blue); font-size: 14px; font-weight: 700; line-height: 1.45; white-space: nowrap; }
     .task-icon { font-size: 22px; line-height: 1.1; }
+    .task-toggle {
+      width: 18px; min-height: 18px; height: 18px; margin: 2px 0 0; padding: 0;
+      border: 0; border-radius: 4px; background: transparent; accent-color: #34a853;
+      cursor: pointer;
+    }
     .task-copy h3 { margin: 0; font-size: 15px; font-weight: 680; letter-spacing: -.015em; }
     .task-copy p { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
     .task--personal .task-time { color: var(--green); }
@@ -180,15 +186,16 @@
       .sync-button { width: 100%; }
       .schedule { border-radius: 22px; }
       .schedule-heading { padding: 20px 17px 14px; }
-      .task { grid-template-columns: 78px 27px minmax(0,1fr); gap: 8px; padding: 15px 13px; }
+      .task { grid-template-columns: 78px 27px 20px minmax(0,1fr); gap: 8px; padding: 15px 13px; }
       .task-time { font-size: 11px; }
       .task-icon { font-size: 19px; }
+      .completion-note { padding: 0 17px 12px; }
       .task-copy h3 { font-size: 14px; }
       .task-copy p { font-size: 12px; }
       .focus { padding: 20px; border-radius: 20px; }
     }
     @media (max-width: 360px) {
-      .task { grid-template-columns: 69px 23px minmax(0,1fr); gap: 6px; padding-right: 10px; padding-left: 10px; }
+      .task { grid-template-columns: 69px 23px 19px minmax(0,1fr); gap: 6px; padding-right: 10px; padding-left: 10px; }
       .task-time { font-size: 10px; }
     }
   </style>
@@ -246,6 +253,7 @@
         <h2 id="schedule-title">Расписание дня</h2>
         <span>Время с точностью до минуты</span>
       </div>
+      <p class="completion-note">Отмечай выполненное галочкой — дела зачеркнутся, а при входе через Google синхронизируются.</p>
       <div id="timeline">
         <article class="task">
       <time class="task-time">10:00–10:15</time>
@@ -292,9 +300,9 @@
     <section class="waitlist" id="waitlist" hidden aria-live="polite"></section>
     <section class="focus" aria-labelledby="focus-title">
       <h2 id="focus-title">💡 Фокус дня</h2>
-      <p>Стабильный режим помогает легче включаться в учебу. Постарайся ложиться и вставать примерно в одно время.</p>
+      <p>В конце дня спокойно оцени невыполненные задачи: перенеси важные на конкретное время, а лишние убери из списка.</p>
     </section>
-    <footer>Обновлено 14:21 по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
+    <footer>Обновлено 14:27 по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
   </main>
   <script src="./firebase-config.js?v=fc374"></script>
   <script>
@@ -306,7 +314,10 @@
     const dayEnd = 1320;
     const localStorageKey = "daily-schedule-" + dateKey;
     const migrationKey = localStorageKey + "-cloud-migrated";
+    const scheduleCompletionPrefix = "__schedule_done__";
+    const localCompletionStorageKey = localStorageKey + "-schedule-completions";
     let storageKey = localStorageKey;
+    let completionStorageKey = localCompletionStorageKey;
     const timeline = document.getElementById("timeline");
     const taskList = document.getElementById("myTasks");
     const message = document.getElementById("message");
@@ -326,7 +337,22 @@
       }
     }
 
+    function readScheduleCompletions(key = completionStorageKey) {
+      try {
+        const saved = localStorage.getItem(key);
+        const parsed = saved ? JSON.parse(saved) : {};
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+        return Object.fromEntries(Object.entries(parsed).filter(([id, done]) =>
+          id.startsWith(scheduleCompletionPrefix) && typeof done === "boolean"
+        ));
+      } catch (error) {
+        message.textContent = "Не удалось прочитать отметки выполненных дел.";
+        return {};
+      }
+    }
+
     let userTasks = readTasks();
+    let completedScheduleItems = readScheduleCompletions();
 
     const syncButton = document.getElementById("syncButton");
     const syncStatus = document.getElementById("syncStatus");
@@ -384,6 +410,21 @@
       return data;
     }
 
+    function scheduleCompletionData(done) {
+      return {
+        title: "Отметка расписания",
+        duration: 5,
+        time: "",
+        done: Boolean(done),
+        createdAt: firebaseApi.serverTimestamp(),
+      };
+    }
+
+    function scheduleCompletionId(item) {
+      const key = [item.start, item.end, item.title].join("|");
+      return scheduleCompletionPrefix + encodeURIComponent(key);
+    }
+
     async function connectFirebase() {
       if (!firebaseConfigured) {
         syncButton.disabled = true;
@@ -419,6 +460,8 @@
           if (!user) {
             storageKey = localStorageKey;
             userTasks = readTasks(localStorageKey);
+            completionStorageKey = localCompletionStorageKey;
+            completedScheduleItems = readScheduleCompletions(localCompletionStorageKey);
             render();
             setSyncMessage("Пока дела доступны только в этом браузере. Войди в тот же Google-аккаунт на втором устройстве.");
             return;
@@ -426,14 +469,21 @@
 
           setSyncMessage("Подключаю общий список дел…");
           const accountStorageKey = localStorageKey + "-user-" + user.uid;
+          const accountCompletionStorageKey = accountStorageKey + "-schedule-completions";
           const hasAccountCache = localStorage.getItem(accountStorageKey) !== null;
+          const hasAccountCompletionCache = localStorage.getItem(accountCompletionStorageKey) !== null;
           const migrationDone = localStorage.getItem(migrationKey) === "yes";
           const localTasks = hasAccountCache
             ? readTasks(accountStorageKey)
             : (migrationDone ? [] : readTasks(localStorageKey));
           storageKey = accountStorageKey;
           userTasks = localTasks;
+          completionStorageKey = accountCompletionStorageKey;
+          completedScheduleItems = readScheduleCompletions(
+            hasAccountCompletionCache ? accountCompletionStorageKey : localCompletionStorageKey
+          );
           saveTasks();
+          saveScheduleCompletions();
           render();
 
           try {
@@ -448,11 +498,24 @@
                 );
               }
             }
+            for (const [completionId, done] of Object.entries(completedScheduleItems)) {
+              if (!remoteIds.has(completionId)) {
+                await firebaseApi.setDoc(
+                  firebaseApi.doc(collectionRef, completionId), scheduleCompletionData(done)
+                );
+              }
+            }
             if (!migrationDone) localStorage.setItem(migrationKey, "yes");
 
             stopCloudListener = firebaseApi.onSnapshot(collectionRef, (snapshot) => {
               if (generation !== syncGeneration) return;
-              userTasks = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))
+              completedScheduleItems = Object.fromEntries(snapshot.docs
+                .filter((item) => item.id.startsWith(scheduleCompletionPrefix))
+                .map((item) => [item.id, Boolean(item.data().done)]));
+              saveScheduleCompletions();
+              userTasks = snapshot.docs.filter((item) =>
+                !item.id.startsWith(scheduleCompletionPrefix)
+              ).map((item) => ({ id: item.id, ...item.data() }))
                 .filter(validTask)
                 .sort((a, b) => {
                   const aTime = a.createdAt && typeof a.createdAt.toMillis === "function" ? a.createdAt.toMillis() : 0;
@@ -525,6 +588,47 @@
       }
     }
 
+    function saveScheduleCompletions() {
+      try {
+        localStorage.setItem(completionStorageKey, JSON.stringify(completedScheduleItems));
+        return true;
+      } catch (error) {
+        message.textContent = "Браузер не разрешил сохранить отметки выполненных дел.";
+        return false;
+      }
+    }
+
+    function toggleScheduleItem(item, done) {
+      if (item.id) {
+        const task = userTasks.find((candidate) => candidate.id === item.id);
+        if (!task) return;
+        task.done = Boolean(done);
+        saveTasks();
+        if (currentUser && cloudReady) {
+          firebaseApi.updateDoc(
+            firebaseApi.doc(taskCollection(currentUser.uid), task.id), { done: task.done }
+          ).catch((error) => {
+            setSyncMessage("Отметка сохранена на устройстве, но не отправлена в облако.", true);
+            console.error("Firestore task completion error:", error);
+          });
+        }
+      } else {
+        const completionId = scheduleCompletionId(item);
+        completedScheduleItems[completionId] = Boolean(done);
+        saveScheduleCompletions();
+        if (currentUser && cloudReady) {
+          firebaseApi.setDoc(
+            firebaseApi.doc(taskCollection(currentUser.uid), completionId),
+            scheduleCompletionData(done)
+          ).catch((error) => {
+            setSyncMessage("Отметка сохранена на устройстве, но не отправлена в облако.", true);
+            console.error("Firestore schedule completion error:", error);
+          });
+        }
+      }
+      render();
+    }
+
     function timeLabel(value) {
       const hour = Math.floor(value / 60).toString().padStart(2, "0");
       const minute = (value % 60).toString().padStart(2, "0");
@@ -544,6 +648,12 @@
       icon.className = "task-icon";
       icon.setAttribute("aria-hidden", "true");
       icon.textContent = item.icon;
+      const checkbox = document.createElement("input");
+      checkbox.className = "task-toggle";
+      checkbox.type = "checkbox";
+      checkbox.checked = Boolean(item.done);
+      checkbox.setAttribute("aria-label", (item.done ? "Снять отметку" : "Отметить выполненным") + ": " + item.title);
+      checkbox.addEventListener("change", () => toggleScheduleItem(item, checkbox.checked));
       const copy = document.createElement("div");
       copy.className = "task-copy";
       const currentBadge = document.createElement("span");
@@ -555,7 +665,7 @@
       const description = document.createElement("p");
       description.textContent = item.description;
       copy.append(currentBadge, title, description);
-      article.append(time, icon, copy);
+      article.append(time, icon, checkbox, copy);
       parent.append(article);
     }
 
@@ -719,12 +829,15 @@
       }
       timeline.replaceChildren();
       for (const item of items) {
+        const cardItem = item.id
+          ? item
+          : { ...item, done: Boolean(completedScheduleItems[scheduleCompletionId(item)]) };
         const classes = [];
-        if (item.category === "personal") classes.push("task--personal");
-        if (item.category === "custom") classes.push("task--custom");
-        if (item.category === "habit") classes.push("task--habit");
-        if (item.done) classes.push("task--done");
-        addCard(timeline, item, item.start, item.end, classes.join(" "));
+        if (cardItem.category === "personal") classes.push("task--personal");
+        if (cardItem.category === "custom") classes.push("task--custom");
+        if (cardItem.category === "habit") classes.push("task--habit");
+        if (cardItem.done) classes.push("task--done");
+        addCard(timeline, cardItem, cardItem.start, cardItem.end, classes.join(" "));
       }
       highlightCurrentTask();
       renderUserTasks(placed);
