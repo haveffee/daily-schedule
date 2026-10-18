@@ -267,15 +267,15 @@
     <section class="panel ai-panel" aria-labelledby="ai-title">
       <p class="section-label">Умный помощник</p>
       <h2 id="ai-title">Обсуди план на сегодня</h2>
-      <p class="panel-intro">Напиши, что нужно учесть или что тебя беспокоит. Помощник посмотрит на расписание и предложит выполнимый план и следующий шаг.</p>
+      <p class="panel-intro">Напиши, что нужно учесть или что тебя беспокоит. Qwen посмотрит на расписание и предложит выполнимый план и следующий шаг.</p>
       <form class="ai-form" id="aiForm">
         <label for="aiPrompt">Твой вопрос или заметка
           <textarea id="aiPrompt" maxlength="1200" placeholder="Например: сегодня мало сил, но нужно подготовиться к математике и разобрать комнату. Как лучше распределить дела?" required></textarea>
         </label>
-        <button id="aiButton" type="submit" disabled>Спросить помощника</button>
+        <button id="aiButton" type="submit">Спросить Qwen</button>
       </form>
-      <p class="ai-privacy">Для ответа текст вопроса и названия дел на сегодня отправляются в Google Gemini через Firebase. Не вводи пароли, платёжные данные и другую конфиденциальную информацию. Помощник ничего не меняет в расписании без тебя.</p>
-      <p class="ai-status" id="aiStatus" aria-live="polite">Проверяю подключение помощника…</p>
+      <p class="ai-privacy">Библиотека и веса Qwen загружаются с jsDelivr и Hugging Face. После этого модель работает в браузере: текст вопроса, расписание и список дел не отправляются провайдеру. Первый файл модели — около 570 МБ; браузер обычно сохраняет его в кэше. Нужен интернет для первой загрузки, а скорость зависит от устройства.</p>
+      <p class="ai-status" id="aiStatus" aria-live="polite">Qwen готов. Модель загрузится при первом вопросе.</p>
       <div class="ai-answer" id="aiAnswer" hidden aria-live="polite"><p id="aiAnswerText"></p></div>
     </section>
     <section class="schedule" aria-labelledby="schedule-title">
@@ -330,9 +330,9 @@
     <section class="waitlist" id="waitlist" hidden aria-live="polite"></section>
     <section class="focus" aria-labelledby="focus-title">
       <h2 id="focus-title">💡 Фокус дня</h2>
-      <p>В конце дня спокойно оцени невыполненные задачи: перенеси важные на конкретное время, а лишние убери из списка.</p>
+      <p>Выбери три главные задачи дня. Если выполнишь их, день уже продвинет тебя к цели.</p>
     </section>
-    <footer>Обновлено 14:56 по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
+    <footer>Обновлено 15:01 по московскому времени · Длительность занятий с репетиторами принята за 60 минут</footer>
   </main>
   <script src="./firebase-config.js?v=fc374-ai1"></script>
   <script>
@@ -404,8 +404,8 @@
     let firebaseApi = null;
     let firebaseAuth = null;
     let firebaseApp = null;
-    let firebaseAppCheckReady = false;
     let aiModel = null;
+    let aiModelLoading = null;
     let aiRequestInProgress = false;
     let currentUser = null;
     let cloudReady = false;
@@ -423,42 +423,47 @@
       aiStatus.style.color = isError ? "#b42318" : "";
     }
 
-    async function initializeAiAssistant(user) {
-      if (!firebaseConfig.appCheckSiteKey || !firebaseAppCheckReady) {
-        aiButton.disabled = true;
-        setAiMessage("Чтобы включить помощника, настрой Firebase AI Logic и App Check для сайта, затем добавь публичный reCAPTCHA Enterprise site key в firebase-config.js.");
-        return;
-      }
-      if (!user) {
-        aiButton.disabled = true;
-        setAiMessage("Войди через Google выше, чтобы пользоваться помощником.");
-        return;
-      }
-      if (aiModel) {
-        aiButton.disabled = false;
-        setAiMessage("Помощник подключен. Можно задать вопрос о сегодняшнем плане.");
-        return;
-      }
+    async function loadQwenModel() {
+      if (aiModel) return aiModel;
+      if (aiModelLoading) return aiModelLoading;
 
-      aiButton.disabled = true;
-      setAiMessage("Подключаю помощника…");
-      try {
-        const aiModule = await import("https://www.gstatic.com/firebasejs/13.0.0/firebase-ai.js");
-        const ai = aiModule.getAI(firebaseApp, { backend: new aiModule.GoogleAIBackend() });
-        const model = aiModule.getGenerativeModel(ai, {
-          model: "gemini-3.5-flash",
-          generationConfig: { temperature: 0.35, maxOutputTokens: 600 },
-        });
-        if (currentUser?.uid !== user.uid) return;
+      aiModelLoading = (async () => {
+        setAiMessage("Подключаю библиотеку Qwen…");
+        const { pipeline } = await import(
+          "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1"
+        );
+        const useWebGpu = Boolean(navigator.gpu);
+        const device = useWebGpu ? "webgpu" : "wasm";
+        const dtype = useWebGpu ? "q4f16" : "q4";
+        setAiMessage(useWebGpu
+          ? "Загружаю Qwen (около 570 МБ). Не закрывай страницу…"
+          : "WebGPU недоступен. Загружаю более крупную CPU-версию Qwen; это может занять больше времени и памяти…");
+
+        const model = await pipeline(
+          "text-generation",
+          "onnx-community/Qwen3-0.6B-ONNX",
+          {
+            device,
+            dtype,
+            progress_callback: (progress) => {
+              if (progress?.status === "progress" && Number.isFinite(progress.progress)) {
+                const percent = Math.round(progress.progress);
+                const file = String(progress.file || "модель").split("/").pop();
+                setAiMessage(`Загружаю ${file}: ${percent}%. Не закрывай страницу…`);
+              }
+            },
+          },
+        );
         aiModel = model;
-        aiButton.disabled = false;
-        setAiMessage("Помощник подключен. Можно задать вопрос о сегодняшнем плане.");
-      } catch (error) {
+        return model;
+      })().catch((error) => {
         aiModel = null;
-        aiButton.disabled = true;
-        setAiMessage("Не удалось подключить ИИ. Проверь Firebase AI Logic в настройках проекта.", true);
-        console.error("Firebase AI Logic initialization error:", error);
-      }
+        throw error;
+      }).finally(() => {
+        aiModelLoading = null;
+      });
+
+      return aiModelLoading;
     }
 
     function updateSyncControls() {
@@ -513,8 +518,6 @@
         syncButton.disabled = true;
         syncButton.textContent = "Синхронизация не настроена";
         setSyncMessage("Сначала добавь параметры Firebase в firebase-config.js. Пока дела сохраняются в этом браузере.");
-        aiButton.disabled = true;
-        setAiMessage("ИИ-помощник использует существующий проект Firebase. Сначала подключи его параметры в firebase-config.js.");
         return;
       }
 
@@ -525,21 +528,6 @@
           import("https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js"),
         ]);
         firebaseApp = appModule.initializeApp(firebaseConfig);
-        if (firebaseConfig.appCheckSiteKey) {
-          try {
-            const appCheckModule = await import("https://www.gstatic.com/firebasejs/13.0.0/firebase-app-check.js");
-            appCheckModule.initializeAppCheck(firebaseApp, {
-              provider: new appCheckModule.ReCaptchaEnterpriseProvider(firebaseConfig.appCheckSiteKey),
-              isTokenAutoRefreshEnabled: true,
-            });
-            firebaseAppCheckReady = true;
-          } catch (error) {
-            setAiMessage("Не удалось инициализировать App Check. Проверь reCAPTCHA Enterprise site key.", true);
-            console.error("Firebase App Check initialization error:", error);
-          }
-        } else {
-          setAiMessage("Для ИИ включи Firebase AI Logic и App Check в Firebase Console, затем добавь reCAPTCHA Enterprise site key в firebase-config.js.");
-        }
         firebaseAuth = authModule.getAuth(firebaseApp);
         firebaseApi = {
           ...storeModule,
@@ -558,9 +546,6 @@
           updateSyncControls();
 
           if (!user) {
-            aiModel = null;
-            aiButton.disabled = true;
-            void initializeAiAssistant(null);
             storageKey = localStorageKey;
             userTasks = readTasks(localStorageKey);
             completionStorageKey = localCompletionStorageKey;
@@ -569,8 +554,6 @@
             setSyncMessage("Пока дела доступны только в этом браузере. Войди в тот же Google-аккаунт на втором устройстве.");
             return;
           }
-
-          void initializeAiAssistant(user);
 
           setSyncMessage("Подключаю общий список дел…");
           const accountStorageKey = localStorageKey + "-user-" + user.uid;
@@ -998,27 +981,6 @@
       event.preventDefault();
       const question = aiInput.value.trim();
       if (!question || question.length > 1200 || aiRequestInProgress) return;
-      if (!currentUser) {
-        setAiMessage("Сначала войди через Google в блоке синхронизации.", true);
-        return;
-      }
-      if (!firebaseAppCheckReady || !aiModel) {
-        setAiMessage("Помощник ещё не настроен. Включи Firebase AI Logic и App Check в Firebase Console.", true);
-        return;
-      }
-
-      const usageKey = "daily-schedule-ai-requests-" + dateKey + "-" + currentUser.uid;
-      let requestCount = 0;
-      try {
-        requestCount = Number(localStorage.getItem(usageKey) || "0");
-        if (!Number.isFinite(requestCount)) requestCount = 0;
-      } catch (error) {
-        requestCount = 0;
-      }
-      if (requestCount >= 8) {
-        setAiMessage("На сегодня хватит 8 вопросов с этого устройства. Продолжим завтра.", true);
-        return;
-      }
 
       const fixedPlan = baseEvents.map((item) => ({
         time: timeLabel(item.start) + "–" + timeLabel(item.end),
@@ -1031,7 +993,8 @@
         preferredStart: task.time || "не задано",
         completed: Boolean(task.done),
       }));
-      const prompt = `Ты — доброжелательный помощник по планированию дня. Отвечай по-русски, коротко и конкретно. Учитывай, что главная долгосрочная цель пользователя — подготовка к ЦЭ/ЦТ для поступления в университет. Не переноси фиксированные дела. Если план перегружен, честно скажи об этом и предложи один реалистичный следующий шаг. Не придумывай свободное время, если его нет. Не меняй данные и не заявляй, что добавил задачи.\n\nДата по Москве: ${dateKey}.\nФиксированное расписание: ${JSON.stringify(fixedPlan)}\nДополнительные дела пользователя: ${JSON.stringify(addedTasks)}\n\nСообщение пользователя: ${question}`;
+      const systemPrompt = "Ты — доброжелательный помощник по планированию дня. Всегда отвечай по-русски, коротко и конкретно. Главная долгосрочная цель пользователя — подготовка к ЦЭ/ЦТ для поступления в университет. Сохраняй фиксированные события и их время. Если план перегружен, честно назови это и предложи один реалистичный следующий шаг. Не выдумывай свободное время. Не меняй данные и не утверждай, что добавил задачи. Не показывай ход рассуждений — выдай только полезный итог.";
+      const userPrompt = `Дата по Москве: ${dateKey}.\nФиксированное расписание: ${JSON.stringify(fixedPlan)}\nДополнительные дела пользователя: ${JSON.stringify(addedTasks)}\n\nСообщение пользователя: ${question}\n/no_think`;
 
       aiRequestInProgress = true;
       aiButton.disabled = true;
@@ -1039,26 +1002,34 @@
       aiAnswer.hidden = true;
       setAiMessage("Подбираю понятный и выполнимый вариант…");
       try {
-        const result = await aiModel.generateContent(prompt);
-        const answer = result.response.text().trim();
+        const model = await loadQwenModel();
+        setAiMessage("Qwen формирует ответ на этом устройстве…");
+        const result = await model(
+          [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          { max_new_tokens: 240, do_sample: false },
+        );
+        const generated = result?.[0]?.generated_text;
+        const lastMessage = Array.isArray(generated) ? generated[generated.length - 1] : null;
+        let answer = (typeof generated === "string" ? generated : lastMessage?.content || "").trim();
+        if (answer.includes("</think>")) answer = answer.split("</think>").at(-1).trim();
+        answer = answer.replace(/^<think>[\s\S]*?<\/think>\s*/i, "").trim();
         if (!answer) throw new Error("empty-response");
-        try { localStorage.setItem(usageKey, String(requestCount + 1)); } catch (error) { /* The reply can still be shown. */ }
         aiAnswerText.textContent = answer;
         aiAnswer.hidden = false;
         setAiMessage("Готово. Если совет подходит, добавь дело в планировщик выше.");
       } catch (error) {
-        const code = String(error?.code || "").toLowerCase();
-        const detail = code.includes("resource-exhausted")
-          ? "Достигнут временный лимит бесплатных запросов. Попробуй позже."
-          : code.includes("permission-denied") || code.includes("app-check")
-            ? "Firebase не принял App Check. Проверь reCAPTCHA Enterprise site key и регистрацию сайта."
-            : "Не получилось получить ответ. Проверь подключение и настройки Firebase AI Logic.";
+        const detail = String(error?.message || "").toLowerCase().includes("webgpu")
+          ? "Браузер не смог запустить Qwen через WebGPU. Попробуй открыть сайт в последней версии Safari или Chrome и освободить память устройства."
+          : "Не получилось загрузить или запустить модель Qwen. Проверь интернет и доступ к jsDelivr/Hugging Face; затем обнови страницу и попробуй снова.";
         setAiMessage(detail, true);
-        console.error("Firebase AI Logic request error:", error);
+        console.error("Local Qwen model error:", error);
       } finally {
         aiRequestInProgress = false;
-        aiButton.disabled = !currentUser || !firebaseAppCheckReady || !aiModel;
-        aiButton.textContent = "Спросить помощника";
+        aiButton.disabled = false;
+        aiButton.textContent = "Спросить Qwen";
       }
     });
 

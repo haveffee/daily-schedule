@@ -1,17 +1,17 @@
-# daily-schedule
+# Персональное расписание
 
-Персональное расписание публикуется на GitHub Pages. `generate.py` создаёт `index.html`, а GitHub Actions обновляет страницу каждый день.
+Сайт публикуется через GitHub Pages. `generate.py` создаёт `index.html` для текущей даты в часовом поясе Europe/Moscow, а GitHub Actions обновляет страницу ежедневно в 07:20 по Москве.
 
-## ИИ-помощник
+## Синхронизация задач
 
-Помощник использует Firebase AI Logic с Gemini Developer API. Он учитывает сегодняшнее расписание и дополнительные дела, но ничего не меняет без пользователя. Перед отправкой вопроса сайт показывает, что текст и названия сегодняшних задач будут переданы Google Gemini через Firebase.
+Список пользовательских дел и отметки выполнения синхронизируются через существующий Firebase Firestore при входе через Google. Без входа дела сохраняются только в текущем браузере. Публичные параметры Firebase находятся в `firebase-config.js`; приватные ключи в репозиторий добавлять нельзя.
 
-Чтобы включить помощника:
+## Помощник Qwen
 
-1. В Firebase Console открой проект `daily-schedule-sync-fc374` и в разделе **AI Logic** нажми **Get started**. Выбери **Gemini Developer API** и бесплатный уровень без подключения Cloud Billing.
-2. Для App Check создай в Google Cloud Console ключ reCAPTCHA Enterprise типа **Web** и укажи домен `haveffee.github.io` (без галочки challenge). Затем в Firebase Console → **App Check** зарегистрируй веб-приложение с этим ключом и включи защиту **Firebase AI Logic**.
-3. Скопируй публичный site key из настроек reCAPTCHA и добавь его в поле `appCheckSiteKey` файла `firebase-config.js`. Это публичный ключ сайта, не секрет Gemini API key.
-4. Сохрани изменения и отправь их в `main`; GitHub Actions обновит Pages.
+Помощник использует локальную ONNX-версию Qwen3-0.6B через Transformers.js. Модель запускается на устройстве пользователя — Firebase AI, Qwen API и API-ключи не нужны. Вопрос, расписание и список дел не отправляются AI-провайдеру. Файлы библиотеки и модели загружаются из jsDelivr и Hugging Face; модель кэшируется браузером.
 
-Gemini Developer API работает на бесплатном уровне без платёжного метода и имеет квоты; reCAPTCHA Enterprise включает до 10 000 оценок в месяц без оплаты. Не подключай Cloud Billing ради помощника.
-Без App Check модель не принимает запросы с опубликованного сайта. Не добавляй в репозиторий приватные API keys, debug tokens или другие секреты.
+При первом вопросе WebGPU-устройство загружает около 570 МБ весов. Если WebGPU в браузере недоступен, используется более крупная CPU-версия (около 919 МБ), которая может отвечать медленно и требовать много памяти. Для первой загрузки нужен интернет и доступ к jsDelivr и Hugging Face. Поддержка WebGPU зависит от версии браузера и устройства; на старом или маломощном телефоне генерация может не запуститься.
+
+Официальные сведения: [Qwen3 ONNX-модель и пример Transformers.js](https://huggingface.co/onnx-community/Qwen3-0.6B-ONNX), [размер квантованных файлов](https://huggingface.co/onnx-community/Qwen3-0.6B-ONNX/tree/main/onnx), [поддержка WebGPU в Transformers.js](https://huggingface.co/docs/transformers.js/guides/webgpu).
+
+Alibaba Cloud Model Studio предлагает отдельный Qwen API, но для него нужен API-ключ; доступность бесплатной квоты зависит от модели и региона. Ключ нельзя безопасно встраивать в клиентский код GitHub Pages, поэтому сайт не вызывает этот API.
