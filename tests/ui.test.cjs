@@ -14,7 +14,7 @@ const normalize = value => value.replace(/[\u00a0\u202f]/g, ' ');
 
 // Exercise the application's event handlers and generated markup without a
 // browser, network, real storage, or a DOM implementation of the app itself.
-function createUI(initial = []) {
+function createUI(initial = [], options = {}) {
   const documentEvents = new Map();
   const windowEvents = new Map();
   const nodes = new Map();
@@ -71,6 +71,7 @@ function createUI(initial = []) {
   const location = { hash: '#money' };
   const window = {
     HVFCore: core, HVFExtras: extras, HVFStore: store,
+    HVFPWA: options.pwa,
     HVFAI: {
       isEnabled: () => false, getStatus: () => 'Локальная оценка',
       subscribe() {}, setEnabled() {},
@@ -116,6 +117,7 @@ function createUI(initial = []) {
       return error;
     },
     navigate(hash) { location.hash = hash; windowEvents.get('hashchange')(); },
+    windowEvent(type) { windowEvents.get(type)?.(); },
     setMonth: value => node('monthPicker').fire('change', { target: { value } })
   };
 }
@@ -331,4 +333,92 @@ test('finance screen renders local saving advice with its public sources', () =>
   ui.navigate('#settings');
   assert.match(ui.html(), /Телефон и компьютер — один помощник/);
   assert.match(ui.html(), /На обоих устройствах нужен один Google-аккаунт/);
+});
+
+test('settings installation panel uses the permanent public link and explains device independence', () => {
+  const ui = createUI();
+  ui.navigate('#settings');
+  const installation = ui.node('installationPanel').innerHTML;
+  assert.match(installation, /href="https:\/\/haveffee\.github\.io\/daily-schedule\/"/);
+  assert.doesNotMatch(installation, /localhost|127\.0\.0\.1/);
+  assert.match(installation, /Компьютер можно выключать/);
+  assert.match(installation, /синхронизация работает через Firebase/);
+  assert.match(installation, /Safari/);
+  assert.match(installation, /Chrome или Edge/);
+  assert.match(installation, /data-action="install-app"[^>]*>Как установить<\/button>/);
+});
+
+test('manual installation help explains Google sync and restores normal editor buttons afterward', async () => {
+  const ui = createUI();
+  ui.navigate('#settings');
+  ui.click('install-app');
+  assert.equal(ui.node('editor').open, true);
+  assert.equal(ui.node('dialogTitle').textContent, 'Установить HVF');
+  assert.match(ui.fields(), /На iPhone открой постоянную ссылку в Safari/);
+  assert.match(ui.fields(), /один Google-аккаунт на каждом устройстве/);
+  assert.match(ui.fields(), /href="https:\/\/support\.apple\.com\/guide\/iphone\/iph42ab2f3a7\/ios"/);
+  assert.equal(ui.node('saveDialog').textContent, 'Понятно');
+  assert.equal(ui.node('cancelDialog').hidden, true);
+  await ui.submit({});
+  assert.equal(ui.node('editor').open, false);
+  assert.equal(ui.records().length, 0, 'acknowledging installation help does not save a financial record');
+
+  ui.click('add-income');
+  assert.equal(ui.node('saveDialog').textContent, 'Сохранить');
+  assert.equal(ui.node('cancelDialog').hidden, false);
+  await ui.submit({ title: 'Подарок после установки', amount: '100', currency: 'BYN', date: DAY });
+  assert.equal(ui.records('income').length, 1);
+});
+
+test('available native installation runs only after its explicit action and refreshes its installed state', async () => {
+  let requests = 0;
+  let status = { canInstall: true, installed: false, offlineReady: false, updateReady: false };
+  const ui = createUI([], { pwa: {
+    getStatus: () => ({ ...status }),
+    async requestInstall() { requests++; return { outcome: 'accepted' }; }
+  } });
+  assert.equal(requests, 0);
+  ui.navigate('#settings');
+  assert.match(ui.node('installationPanel').innerHTML, /Установить HVF/);
+  assert.equal(requests, 0, 'viewing installation information never triggers the native prompt');
+  ui.click('currency', 'USD');
+  ui.navigate('#money');
+  ui.navigate('#settings');
+  assert.equal(requests, 0, 'normal app navigation never triggers the native prompt');
+  ui.click('install-app');
+  await Promise.resolve();
+  assert.equal(requests, 1);
+  assert.match(ui.node('toastText').textContent, /Установка подтверждена/);
+  assert.equal(ui.node('editor').open, false);
+
+  status = { canInstall: false, installed: true, offlineReady: true, updateReady: true };
+  ui.windowEvent('hvf-pwa-status');
+  const installation = ui.node('installationPanel').innerHTML;
+  assert.match(installation, /HVF установлен на этом устройстве/);
+  assert.doesNotMatch(installation, /data-action="install-app"/);
+  assert.match(installation, /Файлы приложения сохранены на этом устройстве/);
+  assert.match(installation, /Доступно обновление/);
+  assert.equal(requests, 1);
+});
+
+test('an unavailable native installation opens platform instructions with sync guidance', async () => {
+  let requests = 0;
+  const ui = createUI([], { pwa: {
+    getStatus: () => ({ canInstall: true }),
+    async requestInstall() { requests++; return { outcome: 'unavailable' }; },
+    getInstallInstructions: () => ({
+      title: 'Установка на Android',
+      steps: ['Открой постоянную ссылку в Chrome.', 'Нажми «Добавить на главный экран».'],
+      sourceUrl: 'https://support.google.com/chrome/answer/9658361'
+    })
+  } });
+  ui.click('install-app');
+  await Promise.resolve();
+  assert.equal(requests, 1);
+  assert.equal(ui.node('editor').open, true);
+  assert.equal(ui.node('dialogTitle').textContent, 'Установка на Android');
+  assert.match(ui.fields(), /Добавить на главный экран/);
+  assert.match(ui.fields(), /один Google-аккаунт на каждом устройстве/);
+  assert.match(ui.fields(), /https:\/\/support\.google\.com\/chrome\/answer\/9658361/);
+  assert.equal(ui.node('saveDialog').textContent, 'Понятно');
 });
