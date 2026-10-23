@@ -145,3 +145,188 @@ test('expense order does not change balances or goal attribution', () => {
   assert.equal(result.goalAllocations[0].spent, 0.3);
   assert.deepEqual(result, allocateBudget({ ...input, expenses: input.expenses.slice().reverse() }));
 });
+
+function fixedBudget(overrides = {}) {
+  return {
+    currency: 'BYN',
+    income: 2000,
+    incomes: [{ id: 'gift', amount: 100, currency: 'BYN' }],
+    commitments: [
+      { id: 'tutors', title: 'Репетиторы', amount: 680, currency: 'BYN' },
+      { id: 'transport', title: 'Проезд', amount: 100, currency: 'BYN' }
+    ],
+    reservePercent: 20,
+    goalsPercent: 20,
+    goals: [{ id: 'holiday', target: 1000, currency: 'BYN' }],
+    ...overrides
+  };
+}
+
+test('additional income funds fixed obligations before reserve, goals and free money', () => {
+  const input = fixedBudget();
+  const original = structuredClone(input);
+  const result = allocateBudget(input);
+  assert.equal(result.salaryIncome, 2000);
+  assert.equal(result.additionalIncome, 100);
+  assert.equal(result.income, 2100);
+  assert.equal(result.mandatoryRequested, 780);
+  assert.equal(result.mandatoryFunded, 780);
+  assert.equal(result.mandatoryShortfall, 0);
+  assert.deepEqual(result.allocations, { essentials: 780, reserve: 264, goals: 211.2, flexible: 844.8 });
+  assert.equal(result.mandatoryRemaining, 780);
+  assert.equal(result.protectedRemaining, 1255.2);
+  assert.equal(result.freeToSpend, 844.8);
+  assert.equal(result.totalAllocated, 2100);
+  assert.deepEqual(input, original);
+});
+
+test('paying a named obligation spends its protected money without subtracting free money twice', () => {
+  const before = allocateBudget(fixedBudget());
+  const after = allocateBudget(fixedBudget({
+    expenses: [{ amount: 680, category: 'essentials', commitmentId: 'tutors', currency: 'BYN' }]
+  }));
+  assert.equal(after.spent, 680);
+  assert.equal(after.available, 1420);
+  assert.equal(after.mandatoryRemaining, 100);
+  assert.equal(after.freeToSpend, before.freeToSpend);
+  assert.deepEqual(after.commitmentAllocations.map(item => [item.id, item.planned, item.spent, item.remaining]), [
+    ['tutors', 680, 680, 0], ['transport', 100, 0, 100]
+  ]);
+});
+
+test('an obligation overrun cannot consume another obligation or planned savings', () => {
+  const result = allocateBudget(fixedBudget({
+    expenses: [{ amount: 900, category: 'essentials', commitmentId: 'tutors', currency: 'BYN' }]
+  }));
+  assert.equal(result.commitmentAllocations[0].remaining, -220);
+  assert.equal(result.commitmentAllocations[1].remaining, 100);
+  assert.equal(result.mandatoryRemaining, 100);
+  assert.equal(result.protectedRemaining, 575.2);
+  assert.equal(result.available, 1200);
+  assert.equal(result.freeToSpend, 624.8);
+  assert.equal(result.protectionShortfall, 0);
+  const exhausted = allocateBudget(fixedBudget({
+    expenses: [{ amount: 1800, category: 'essentials', commitmentId: 'tutors', currency: 'BYN' }]
+  }));
+  assert.equal(exhausted.freeToSpend, 0);
+  assert.equal(exhausted.protectionShortfall, 275.2);
+  assert.equal(exhausted.deficit, 0);
+});
+
+test('unlinked or unknown essential expenses spend free money and preserve every named obligation', () => {
+  for (const commitmentId of [undefined, 'missing']) {
+    const result = allocateBudget(fixedBudget({
+      expenses: [{ amount: 80, category: 'essentials', commitmentId, currency: 'BYN' }]
+    }));
+    assert.equal(result.envelopes.essentials.spent, 80);
+    assert.equal(result.mandatoryRemaining, 780);
+    assert.equal(result.protectedRemaining, 1255.2);
+    assert.equal(result.freeToSpend, 764.8);
+    assert.deepEqual(result.commitmentAllocations.map(item => item.spent), [0, 0]);
+  }
+});
+
+test('insufficient income reports each unfunded obligation and leaves no imaginary free money', () => {
+  const result = allocateBudget(fixedBudget({ income: 500, incomes: [] }));
+  assert.equal(result.mandatoryRequested, 780);
+  assert.equal(result.mandatoryFunded, 500);
+  assert.equal(result.mandatoryShortfall, 280);
+  assert.deepEqual(result.commitmentAllocations.map(item => [item.planned, item.shortfall]), [[500, 180], [0, 100]]);
+  assert.deepEqual(result.allocations, { essentials: 500, reserve: 0, goals: 0, flexible: 0 });
+  assert.equal(result.freeToSpend, 0);
+  assert.equal(result.protectionShortfall, 0);
+});
+
+test('an explicit empty obligation list uses only the requested savings percentages', () => {
+  const result = allocateBudget({ income: 100, commitments: [], reservePercent: 20, goalsPercent: 20, goals: [] });
+  assert.deepEqual(result.allocations, { essentials: 0, reserve: 20, goals: 0, flexible: 80 });
+  assert.equal(result.freeToSpend, 80);
+  const capped = allocateBudget({ income: 100, commitments: [], reservePercent: 20, goalsPercent: 20, goals: [{ id: 'g', target: 5 }] });
+  assert.deepEqual(capped.allocations, { essentials: 0, reserve: 20, goals: 5, flexible: 75 });
+  assert.equal(capped.freeToSpend, 75);
+});
+
+test('BYN, USD and RUB ledgers never add or relabel each other’s transactions', () => {
+  const input = {
+    income: 100,
+    reservePercent: 0,
+    goalsPercent: 0,
+    incomes: [{ amount: 10, currency: 'BYN' }, { amount: 20, currency: 'USD' }, { amount: 30, currency: 'RUB' }, { amount: 40 }],
+    commitments: [{ id: 'byn', amount: 10, currency: 'BYN' }, { id: 'usd', amount: 20, currency: 'USD' }, { id: 'rub', amount: 30, currency: 'RUB' }, { id: 'legacy', amount: 40 }],
+    goals: [{ id: 'byn', target: 1, currency: 'BYN' }, { id: 'usd', target: 1, currency: 'USD' }, { id: 'rub', target: 1, currency: 'RUB' }, { id: 'legacy', target: 1 }],
+    expenses: [{ amount: 1, currency: 'BYN' }, { amount: 2, currency: 'USD' }, { amount: 3, currency: 'RUB' }, { amount: 4 }]
+  };
+  for (const [currency, extra, required, spent, ids] of [
+    ['BYN', 10, 10, 1, ['byn']], ['USD', 20, 20, 2, ['usd']], ['RUB', 70, 70, 7, ['rub', 'legacy']]
+  ]) {
+    const result = allocateBudget({ ...input, currency });
+    assert.equal(result.currency, currency);
+    assert.equal(result.additionalIncome, extra);
+    assert.equal(result.income, 100 + extra);
+    assert.equal(result.mandatoryRequested, required);
+    assert.equal(result.spent, spent);
+    assert.deepEqual(result.commitmentAllocations.map(item => item.id), ids);
+    assert.deepEqual(result.goalAllocations.map(item => item.id), ids);
+  }
+  assert.equal(allocateBudget({ ...input, currency: ' byn ' }).currency, 'BYN');
+});
+
+test('mixed currencies cannot attach expenses to a different ledger’s protected items', () => {
+  const result = allocateBudget(fixedBudget({
+    expenses: [
+      { amount: 680, category: 'essentials', commitmentId: 'tutors', currency: 'USD' },
+      { amount: 100, category: 'goal', goalId: 'holiday' }
+    ]
+  }));
+  assert.equal(result.spent, 0);
+  assert.equal(result.mandatoryRemaining, 780);
+  assert.equal(result.goalAllocations[0].spent, 0);
+  assert.equal(result.freeToSpend, 844.8);
+});
+
+test('a named goal payment only releases that goal’s protection, including when it overruns', () => {
+  const result = allocateBudget(fixedBudget({
+    goals: [{ id: 'first', target: 100, currency: 'BYN' }, { id: 'second', target: 1000, currency: 'BYN' }],
+    expenses: [{ amount: 150, category: 'goal', goalId: 'first', currency: 'BYN' }]
+  }));
+  assert.deepEqual(result.goalAllocations.map(item => [item.allocation, item.spent, item.budgetRemaining]), [[100, 150, -50], [111.2, 0, 111.2]]);
+  assert.equal(result.protectedRemaining, 1155.2);
+  assert.equal(result.freeToSpend, 794.8);
+  const unlinked = allocateBudget(fixedBudget({ expenses: [{ amount: 50, category: 'goal', currency: 'BYN' }] }));
+  assert.equal(unlinked.goalAllocations[0].spent, 0);
+  assert.equal(unlinked.protectedRemaining, 1255.2);
+  assert.equal(unlinked.freeToSpend, 794.8);
+});
+
+test('fixed allocation rounds income once, keeps exact cents and returns capped goals to free funds', () => {
+  const result = allocateBudget({
+    currency: 'BYN', income: '100,01', incomes: [{ amount: '0.005', currency: 'BYN' }],
+    commitments: [{ id: 'a', amount: '10.005', currency: 'BYN' }],
+    reservePercent: 20, goalsPercent: 20, goals: [{ id: 'g', target: '1.005', currency: 'BYN' }],
+    expenses: [{ amount: '0.1', currency: 'BYN' }, { amount: '0.2', currency: 'BYN' }]
+  });
+  assert.equal(result.income, 100.02);
+  assert.equal(result.additionalIncome, 0.01);
+  assert.deepEqual(result.allocations, { essentials: 10.01, reserve: 18, goals: 1.01, flexible: 71 });
+  assert.equal(result.spent, 0.3);
+  assert.equal(result.freeToSpend, 70.7);
+  assert.equal(Object.values(result.allocations).reduce((sum, amount) => sum + Math.round(amount * 100), 0), 10002);
+});
+
+test('invalid income, obligation and expense amounts cannot add or remove money', () => {
+  const result = allocateBudget({
+    currency: 'BYN', income: -100,
+    incomes: [null, { amount: -20, currency: 'BYN' }, { amount: 'invalid', currency: 'BYN' }, { amount: Infinity, currency: 'BYN' }, { amount: 100, currency: 'BYN' }],
+    commitments: [null, { id: 'negative', amount: -30, currency: 'BYN' }, { id: 'invalid', amount: {}, currency: 'BYN' }, { id: 'real', amount: 40, currency: 'BYN' }],
+    reservePercent: 150, goalsPercent: 150,
+    expenses: [null, { amount: -5, currency: 'BYN' }, { amount: 'bad', currency: 'BYN' }, { amount: 1.5, currency: 'BYN' }]
+  });
+  assert.equal(result.income, 100);
+  assert.equal(result.mandatoryRequested, 40);
+  assert.deepEqual(result.allocations, { essentials: 40, reserve: 60, goals: 0, flexible: 0 });
+  assert.equal(result.spent, 1.5);
+  assert.equal(result.freeToSpend, 0);
+  assert.equal(result.protectionShortfall, 1.5);
+  assert.equal(result.reservePercent, 100);
+  assert.equal(result.goalsPercent, 100);
+});

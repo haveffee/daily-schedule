@@ -317,3 +317,57 @@ test('a delayed cross-tab storage event cannot replay an older acknowledged edit
   assert.equal(backend.held.length, 0, 'an already acknowledged old edit is not queued again');
   assert.equal(backend.documents.get('alice/2026-10').assistantV2['shared-tab'].value.title, 'second');
 });
+
+test('income, fixed commitments and currencies sync as separate records between devices', async () => {
+  const backend = new Backend();
+  const desktop = await client(backend).start('alice');
+  const phone = await client(backend).start('alice');
+  desktop.store.put({ id: 'budget-2026-10-BYN', kind: 'budget', month: '2026-10', currency: 'BYN', income: 2000 });
+  desktop.store.put({ id: 'tutors', kind: 'commitment', month: '2026-10', title: 'Tutors', amount: 680, currency: 'BYN' });
+  phone.store.put({ id: 'gift', kind: 'income', month: '2026-10', date: '2026-10-23', title: 'Gift', amount: 100, currency: 'BYN' });
+  phone.store.put({ id: 'freelance', kind: 'income', month: '2026-10', date: '2026-10-23', title: 'Freelance', amount: 45.67, currency: 'USD' });
+  phone.store.put({ id: 'roubles', kind: 'income', month: '2026-10', date: '2026-10-23', title: 'Other', amount: 800, currency: 'RUB' });
+  await settle();
+  assert.deepEqual(desktop.records(), phone.records());
+  assert.equal(desktop.records().gift.amount, 100);
+  assert.equal(desktop.records().tutors.amount, 680);
+  assert.equal(desktop.records().freelance.currency, 'USD');
+  assert.equal(desktop.records().roubles.currency, 'RUB');
+
+  desktop.store.put({ ...desktop.records()['budget-2026-10-BYN'], income: 2200 });
+  phone.store.put({ ...phone.records().gift, amount: 150 });
+  await settle();
+  const reloadedPhone = await client(backend).start('alice');
+  assert.deepEqual(reloadedPhone.records(), desktop.records());
+  assert.equal(reloadedPhone.records()['budget-2026-10-BYN'].income, 2200);
+  assert.equal(reloadedPhone.records().gift.amount, 150);
+  assert.equal(reloadedPhone.records().tutors.amount, 680);
+});
+
+test('finance preferences and monthly records retain scope through offline replay and account changes', async () => {
+  const backend = new Backend();
+  const desktop = await client(backend).start('alice');
+  const phone = await client(backend).start('alice');
+  const preference = { id: 'finance-preferences', kind: 'preferences', month: '2000-01', currency: 'BYN' };
+  desktop.store.put(preference);
+  desktop.store.put({ id: 'budget-2026-10-BYN', kind: 'budget', month: '2026-10', currency: 'BYN', income: 2000 });
+  await settle();
+  phone.offline();
+  phone.store.put({ ...preference, currency: 'USD' });
+  phone.store.put({ id: 'budget-2026-11-BYN', kind: 'budget', month: '2026-11', currency: 'BYN', income: 2500 });
+  phone.store.setPeriod('2026-11', '2026-11-01');
+  assert.throws(() => phone.store.put({ ...phone.records()['budget-2026-10-BYN'], month: '2026-11' }), /новый id/);
+  phone.online(); await settle();
+  assert.equal(desktop.records()['finance-preferences'].currency, 'USD');
+  assert.equal(desktop.records()['budget-2026-10-BYN'].income, 2000);
+  assert.equal(desktop.records()['budget-2026-11-BYN'].income, 2500);
+  assert.equal(backend.documents.get('alice/2000-01').assistantV2['finance-preferences'].value.currency, 'USD');
+
+  phone.login('bob'); await settle();
+  assert.deepEqual(phone.records(), {});
+  phone.store.put({ ...preference, currency: 'RUB' }); await settle();
+  phone.login('alice'); await settle();
+  assert.equal(phone.records()['finance-preferences'].currency, 'USD');
+  assert.equal(phone.records()['budget-2026-11-BYN'].income, 2500);
+  assert.equal(backend.documents.get('bob/2000-01').assistantV2['finance-preferences'].value.currency, 'RUB');
+});

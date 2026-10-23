@@ -16,19 +16,26 @@
   document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const uid = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)+Math.random().toString(36).slice(2);
-  const nowDate = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Moscow',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-  let day = nowDate(), month = day.slice(0,7), state = store.getState(), view = 'overview', submitEditor = null, busy = false, planningGoal = '', toastTimer, undoAction;
-  const fmtDate = (date, options={day:'numeric',month:'long'}) => new Intl.DateTimeFormat('ru-RU',{...options,timeZone:'Europe/Moscow'}).format(new Date(date+'T12:00:00+03:00'));
+  const nowDate = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Minsk',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  let day = nowDate(), month = day.slice(0,7), state = store.getState(), view = 'overview', lastRenderedView = '', submitEditor = null, busy = false, planningGoal = '', toastTimer, undoAction;
+  const fmtDate = (date, options={day:'numeric',month:'long'}) => new Intl.DateTimeFormat('ru-RU',{...options,timeZone:'Europe/Minsk'}).format(new Date(date+'T12:00:00+03:00'));
   const monthLabel = () => fmtDate(month+'-01',{month:'long',year:'numeric'}).replace(' г.','');
-  const money = (n) => new Intl.NumberFormat('ru-RU',{style:'currency',currency:'RUB',maximumFractionDigits:Number.isInteger(n)?0:2}).format(Number(n)||0);
+  const currencies = {BYN:'Белорусский рубль',USD:'Доллар США',RUB:'Российский рубль'};
+  const recordCurrency = (record) => Object.hasOwn(currencies,record?.currency)?record.currency:'RUB';
+  const selectedCurrency = () => Object.hasOwn(currencies,state.records['finance-preferences']?.currency) ? state.records['finance-preferences'].currency : 'BYN';
+  const money = (n,currency=selectedCurrency()) => new Intl.NumberFormat('ru-BY',{style:'currency',currency,currencyDisplay:'code',maximumFractionDigits:Number.isInteger(n)?0:2}).format(Number(n)||0);
   const time = (m) => String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
   const duration = (m) => m>=60 ? Math.floor(m/60)+' ч'+(m%60?' '+m%60+' мин':'') : m+' мин';
   const records = (kind) => Object.values(state.records).filter(r => r.month === month && r.kind === kind).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
   const getRecord = (id) => state.records[id];
   const settings = () => records('settings')[0] || {start:'09:00',end:'22:00',breakMinutes:5};
-  const budgetConfig = () => records('budget')[0] || {income:0,essentialPercent:50,reservePercent:20};
+  const currencyRecords = (kind,currency=selectedCurrency()) => records(kind).filter(record=>recordCurrency(record)===currency);
+  const budgetConfig = (currency=selectedCurrency()) => currencyRecords('budget',currency).find(r=>r.id==='budget-'+month+'-'+currency)||currencyRecords('budget',currency)[0]||{income:0,reservePercent:20,goalsPercent:20,currency};
   const dailyTasks = () => records('task').filter(t=>t.date===day);
-  const budget = () => core.allocateBudget({...budgetConfig(),goals:records('goal'),expenses:records('expense')});
+  const budget = (currency=selectedCurrency()) => core.allocateBudget({...budgetConfig(currency),currency,incomes:records('income'),commitments:records('commitment'),goals:records('goal'),expenses:records('expense')});
+  function setCurrency(currency) {if(Object.hasOwn(currencies,currency))store.put({id:'finance-preferences',kind:'finance-preferences',month:'2000-01',currency});}
+  function currencyField(value=selectedCurrency()) {return selectField('Валюта','currency',Object.entries(currencies).map(([c,n])=>[c,c+' · '+n]),value);}
+  function currencyStrip() {return '<div class="currency-strip" role="group" aria-label="Валюта бюджета">'+Object.keys(currencies).map(c=>'<button type="button" data-action="currency" data-id="'+c+'" aria-pressed="'+(c===selectedCurrency())+'" class="currency-tab '+(c===selectedCurrency()?'active':'')+'">'+c+'<small>'+currencies[c]+'</small></button>').join('')+'</div>';}
   const plan = () => core.schedule(dailyTasks(),settings());
   const button = (label, action, cls='', id='') => '<button type="button" class="button '+cls+'" data-action="'+action+'"'+(id?' data-id="'+esc(id)+'"':'')+'>'+label+'</button>';
   const head = (title, subtitle, action='') => '<div class="page-head"><div><p class="eyebrow">'+esc(monthLabel().toUpperCase())+'</p><h1>'+title+'</h1><p class="subhead">'+subtitle+'</p></div>'+action+'</div>';
@@ -52,7 +59,7 @@
   function progress(goal) {
     const tasks=records('task').filter(t=>t.goalId===goal.id), done=tasks.filter(t=>t.done).length;
     const percent=tasks.length?Math.round(done/tasks.length*100):Number(goal.target)>0?Math.min(100,Math.round((Number(goal.saved)||0)/goal.target*100)):0;
-    return {percent,text:tasks.length?done+' из '+tasks.length+' шагов':Number(goal.target)>0?money(Number(goal.saved)||0)+' из '+money(goal.target):'Пока без шагов'};
+    return {percent,text:tasks.length?done+' из '+tasks.length+' шагов':Number(goal.target)>0?money(Number(goal.saved)||0,recordCurrency(goal))+' из '+money(goal.target,recordCurrency(goal)):'Пока без шагов'};
   }
   function miniGoals() {
     const goals=records('goal');
@@ -62,22 +69,43 @@
   function budgetLines(b,detail=false) {
     return '<div class="budget-bar">'+Object.entries(b.envelopes).map(([k,e])=>'<span class="c-'+k+'" style="width:'+(b.income?100*e.planned/b.income:0)+'%"></span>').join('')+'</div><div class="budget-list">'+Object.entries(b.envelopes).map(([k,e])=>'<div><div class="budget-line"><span class="budget-line-label"><span class="budget-dot c-'+k+'"></span>'+envelopeNames[k]+'</span><strong>'+money(detail?e.remaining:e.planned)+'</strong></div>'+(detail?'<p class="status-note" style="margin:3px 0 0 16px">План '+money(e.planned)+' · потрачено '+money(e.spent)+(e.remaining<0?' · перерасход':'')+'</p>':'')+'</div>').join('')+'</div>';
   }
-  function moneyPanel() {const b=budget();return '<section class="panel">'+panelHead('Деньги под контролем','money')+(b.income?'<span class="muted" style="font-size:10px">Доступно в этом месяце</span><strong class="money-total">'+money(b.available)+'</strong>'+budgetLines(b):empty('wallet','Начнём с дохода','Укажи зарплату за этот месяц. Помощник распределит её по твоим приоритетам.',button('Указать зарплату','edit-budget','small secondary')))+'</section>';}
+  function moneyPanel() {const b=budget();return '<section class="panel">'+panelHead('Деньги под контролем','money')+currencyStrip()+(b.income?'<span class="muted" style="font-size:10px">Можно тратить свободно</span><strong class="money-total">'+money(b.freeToSpend)+'</strong><p class="status-note">Всего осталось '+money(b.available)+' · из них отложено '+money(b.protectedRemaining)+'</p>'+budgetLines(b):empty('wallet','Начнём с дохода','Добавь зарплату или другое поступление. Затем укажи обязательные суммы.',button('Указать зарплату','edit-budget','small secondary')))+'</section>';}
   function overview() {
     const tasks=dailyTasks(), goals=records('goal'), b=budget();
-    return head('Всё важное — рядом.','Твой день, твои цели и спокойствие в деньгах.',button(icon('plus')+' Добавить дело','add-task'))+'<section class="hero"><div><p class="eyebrow">ТВОЙ ЛИЧНЫЙ ПОМОЩНИК</p><h2>Меньше суеты.<br>Больше своего.</h2><p>Освободи голову для важного. Я помогу собрать планы,<br class="desktop-br"> найти время для целей и разложить бюджет.</p>'+button('Начать с цели '+icon('arrow'),'add-goal','lime')+'</div><div class="hero-art" aria-hidden="true"><div class="orbit"></div><span class="spark">✧</span><div class="orb">'+icon('assistant')+'</div><span class="art-dot"></span></div></section><div class="stats">'+stat('Дела на день',tasks.filter(t=>t.done).length+' <span class="muted" style="font-size:17px">/ '+tasks.length+'</span>',fmtDate(day),'calendar')+stat('Цели месяца',String(goals.length),goals.length?'В своём темпе, по своему плану':'Добавь то, что важно тебе','target')+stat('Остаток бюджета',money(b.available),b.income?'Потрачено '+money(b.spent):'Зарплата ещё не указана','wallet')+'</div><div class="columns"><div class="stack">'+dayPanel(true)+'<div class="insight">'+icon('spark')+'<div><h3>'+(!tasks.length?'План начинается с тебя':plan().waiting.length?'Оставь дню немного воздуха':'На всё — своё время')+'</h3><p>'+(!tasks.length?'Здесь нет чужого расписания. Добавляй и убирай дела, а свободное время остаётся твоим.':plan().waiting.length?'Не все дела поместились. Открой «Мой день», чтобы сократить задачу или выбрать другую дату.':'После изменения дел план пересчитывается. Указанные встречи сохраняют своё время.')+'</p></div></div></div><div class="stack">'+miniGoals()+moneyPanel()+'</div></div>';
+    return head('Всё важное — рядом.','Твой день, твои цели и спокойствие в деньгах.',button(icon('plus')+' Добавить дело','add-task'))+'<section class="hero"><div><p class="eyebrow">ТВОЙ ЛИЧНЫЙ ПОМОЩНИК</p><h2>Меньше суеты.<br>Больше своего.</h2><p>Освободи голову для важного. Я помогу собрать планы,<br class="desktop-br"> найти время для целей и разложить бюджет.</p>'+button('Начать с цели '+icon('arrow'),'add-goal','lime')+'</div><div class="hero-art" aria-hidden="true"><div class="orbit"></div><span class="spark">✧</span><div class="orb">'+icon('assistant')+'</div><span class="art-dot"></span></div></section><div class="stats">'+stat('Дела на день',tasks.filter(t=>t.done).length+' <span class="muted" style="font-size:17px">/ '+tasks.length+'</span>',fmtDate(day),'calendar')+stat('Цели месяца',String(goals.length),goals.length?'В своём темпе, по своему плану':'Добавь то, что важно тебе','target')+stat('Свободные деньги',money(b.freeToSpend),b.income?'Потрачено '+money(b.spent):'Зарплата ещё не указана','wallet')+'</div><div class="columns"><div class="stack">'+dayPanel(true)+'<div class="insight">'+icon('spark')+'<div><h3>'+(!tasks.length?'План начинается с тебя':plan().waiting.length?'Оставь дню немного воздуха':'На всё — своё время')+'</h3><p>'+(!tasks.length?'Здесь нет чужого расписания. Добавляй и убирай дела, а свободное время остаётся твоим.':plan().waiting.length?'Не все дела поместились. Открой «Мой день», чтобы сократить задачу или выбрать другую дату.':'После изменения дел план пересчитывается. Указанные встречи сохраняют своё время.')+'</p></div></div></div><div class="stack">'+miniGoals()+moneyPanel()+'</div></div>';
   }
   function goalsView() {
     const goals=records('goal');
-    return head('Твои большие «хочу».','Задай направление на месяц. Разобьём путь на небольшие шаги.',button(icon('plus')+' Добавить цель','add-goal'))+(goals.length?'<div class="goal-grid">'+goals.map(g=>{const p=progress(g);return '<section class="panel goal-card"><div class="goal-top"><div class="goal-badge">'+icon('target')+'</div>'+actions('goal',g.id)+'</div><h3>'+esc(g.title)+'</h3><p class="outcome">'+esc(g.outcome||'Опиши результат, к которому хочешь прийти в этом месяце.')+'</p><div class="goal-bottom"><div class="goal-numbers"><span>'+p.text+'</span><strong>'+p.percent+'%</strong></div><div class="progress-track"><div class="progress-fill" style="width:'+p.percent+'%"></div></div>'+(Number(g.target)>0?'<p class="status-note">Денежная цель: '+money(g.target)+' · '+(g.priority>=2?'высокий':g.priority===0?'низкий':'обычный')+' приоритет</p>':'')+'<div class="goal-buttons">'+button(planningGoal===g.id?'Продумываю шаги…':records('task').some(t=>t.goalId===g.id)?'Добавить шаг вручную':'Разбить на шаги',records('task').some(t=>t.goalId===g.id)?'goal-task':'plan-goal','small secondary',g.id)+'</div></div></section>';}).join('')+'</div>':'<section class="panel">'+empty('target','Твой месяц — чистый лист','Никаких встроенных целей. Напиши, чего хочешь достичь: закончить проект, освоить навык или накопить на важное.',button('+ Добавить первую цель','add-goal'))+'</section>')+'<div class="notice">Шаги появятся в плане дня. Если указать сумму цели, она также попадёт в распределение зарплаты. Предложенный план можно менять.</div>';
+    return head('Твои большие «хочу».','Задай направление на месяц. Разобьём путь на небольшие шаги.',button(icon('plus')+' Добавить цель','add-goal'))+(goals.length?'<div class="goal-grid">'+goals.map(g=>{const p=progress(g);return '<section class="panel goal-card"><div class="goal-top"><div class="goal-badge">'+icon('target')+'</div>'+actions('goal',g.id)+'</div><h3>'+esc(g.title)+'</h3><p class="outcome">'+esc(g.outcome||'Опиши результат, к которому хочешь прийти в этом месяце.')+'</p><div class="goal-bottom"><div class="goal-numbers"><span>'+p.text+'</span><strong>'+p.percent+'%</strong></div><div class="progress-track"><div class="progress-fill" style="width:'+p.percent+'%"></div></div>'+(Number(g.target)>0?'<p class="status-note">Денежная цель: '+money(g.target,recordCurrency(g))+' · '+(g.priority>=2?'высокий':g.priority===0?'низкий':'обычный')+' приоритет</p>':'')+'<div class="goal-buttons">'+button(planningGoal===g.id?'Продумываю шаги…':records('task').some(t=>t.goalId===g.id)?'Добавить шаг вручную':'Разбить на шаги',records('task').some(t=>t.goalId===g.id)?'goal-task':'plan-goal','small secondary',g.id)+'</div></div></section>';}).join('')+'</div>':'<section class="panel">'+empty('target','Твой месяц — чистый лист','Никаких встроенных целей. Напиши, чего хочешь достичь: закончить проект, освоить навык или накопить на важное.',button('+ Добавить первую цель','add-goal'))+'</section>')+'<div class="notice">Шаги появятся в плане дня. Если указать сумму цели, она также попадёт в распределение зарплаты. Предложенный план можно менять.</div>';
   }
   function goalSteps(goalId) {
     const steps=records('task').filter(t=>t.goalId===goalId).sort((a,b)=>a.date.localeCompare(b.date));
     return steps.length?'<div class="goal-steps">'+steps.map(t=>'<button type="button" class="goal-step" data-action="open-task-day" data-id="'+esc(t.id)+'"><span class="step-check">'+(t.done?'✓':'○')+'</span><span>'+esc(t.title)+'<small>'+fmtDate(t.date)+' · '+duration(t.duration)+'</small></span><span>↗</span></button>').join('')+'</div>':'';
   }
+  function financialHistory(kind) {
+    const items=currencyRecords(kind).sort((a,b)=>b.date.localeCompare(a.date)||(b.createdAt||0)-(a.createdAt||0));
+    if(!items.length)return empty('wallet',kind==='income'?'Подарки и подработки — тоже доход':'Пока без расходов',kind==='income'?'Поступления добавляются к зарплате и увеличивают бюджет.':'Записывай траты, чтобы видеть точный свободный остаток.',button(kind==='income'?'+ Добавить поступление':'+ Записать расход',kind==='income'?'add-income':'add-expense','small secondary'));
+    return items.map(item=>{
+      const category=kind==='income'?'Дополнительный доход':item.commitmentId?(getRecord(item.commitmentId)?.title||item.commitmentTitle||'Обязательная сумма (архив)'):item.category==='goal'?(getRecord(item.goalId)?.title||'Цель (архив)'):envelopeNames[item.category]||'Свободные деньги';
+      return '<article class="expense-row"><span class="expense-icon '+(kind==='income'?'income-icon':'')+'">'+icon(kind==='income'?'plus':'wallet')+'</span><div><h3>'+esc(item.title)+'</h3><p>'+fmtDate(item.date)+' · '+esc(category)+'</p></div><strong class="'+(kind==='income'?'income-amount':'')+'">'+(kind==='income'?'+':'−')+money(item.amount)+'</strong>'+actions(kind,item.id)+'</article>';
+    }).join('');
+  }
+  function commitmentPanel(b) {
+    return '<section class="panel"><div class="panel-head"><h2>Обязательно отложить</h2><button type="button" class="text-link" data-action="add-commitment">+ Добавить</button></div><p class="status-note" style="margin:0 0 16px">Эти суммы откладываются первыми. Оплачивай нужный пункт здесь, чтобы учесть трату из его резерва.</p>'+(b.commitmentAllocations.length?b.commitmentAllocations.map(c=>'<article class="commitment-card"><div class="allocation-top"><strong>'+esc(c.title)+'</strong>'+actions('commitment',c.id)+'</div><div class="commitment-amount">'+money(c.amount)+'<small>'+(c.dueDay?'до '+Math.min(c.dueDay,new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate())+' числа':'на месяц')+'</small></div><div class="progress-track"><div class="progress-fill" style="width:'+Math.min(100,c.amount?c.spent/c.amount*100:0)+'%"></div></div><p class="status-note">Оплачено '+money(c.spent)+' · ещё отложено '+money(Math.max(0,c.remaining))+(c.shortfall?' · не хватает '+money(c.shortfall):'')+'</p>'+(c.spent<c.amount?button('Записать оплату','pay-commitment','small secondary',c.id):'<span class="tag">Оплачено</span>')+'</article>').join(''):empty('wallet','Свои обязательные суммы','Например: репетиторы — 680 BYN, проезд — своя сумма. Запиши их один раз на месяц.',button('+ Добавить сумму','add-commitment','small secondary')))+'<button type="button" class="text-link copy-commitments" data-action="copy-commitments">Повторить суммы из прошлого месяца ↗</button></section>';
+  }
+  function moneyAdvice(b,days) {
+    const extras=window.HVFExtras;
+    if(!extras)return '';
+    const insights=extras.insights(b,selectedCurrency(),days);
+    return '<section class="panel">'+panelHead('Подсказки помощника')+insights.map(i=>'<div class="notice '+(i.tone==='warning'?'warning':'')+'"><strong>'+esc(i.title)+'</strong><br>'+esc(i.text)+'</div>').join('')+'<details class="saving-tips"><summary>Как удобнее откладывать</summary>'+extras.tips.map(t=>'<article><h3>'+esc(t.title)+'</h3><p>'+esc(t.text)+'</p><a href="'+esc(t.url)+'" target="_blank" rel="noopener noreferrer">'+esc(t.source)+' ↗</a></article>').join('')+'</details></section>';
+  }
   function moneyView() {
-    const b=budget(), expenses=records('expense').sort((a,b)=>b.date.localeCompare(a.date)||(b.createdAt||0)-(a.createdAt||0));
-    return head('Деньги с намерением.','Зарплата, нужные траты и твои цели — в одном месте.',button(icon('plus')+' Записать расход','add-expense'))+'<div class="stats">'+stat('Доход за месяц',money(b.income),'Зарплата и другие поступления','wallet')+stat('Потрачено',money(b.spent),expenses.length+' записей о расходах','arrow')+stat(b.deficit?'Перерасход':'Осталось',money(b.deficit||b.available),b.deficit?'Расходы превышают доход':'Доход за вычетом расходов','target')+'</div><div class="columns"><div class="stack"><section class="panel"><div class="panel-head"><h2>Распределение зарплаты</h2><button class="text-link" type="button" data-action="edit-budget">Изменить ↗</button></div>'+(b.income?budgetLines(b,true):empty('wallet','Сколько пришло в этом месяце?','Введи доход и выбери доли обязательных расходов и резерва. Остаток пойдёт на цели по приоритету.',button('Указать доход','edit-budget','secondary'))) +'<p class="status-note">Это план распределения. Суммы не переводятся между счетами. Остаток целей без денежной суммы остаётся свободным.</p></section><section class="panel">'+panelHead('История расходов')+(expenses.length?expenses.map(e=>'<article class="expense-row"><span class="expense-icon">'+icon('wallet')+'</span><div><h3>'+esc(e.title)+'</h3><p>'+fmtDate(e.date)+' · '+esc(e.category==='goal'?getRecord(e.goalId)?.title||'Цель':envelopeNames[e.category]||'Свободные деньги')+'</p></div><strong>−'+money(e.amount)+'</strong>'+actions('expense',e.id)+'</article>').join(''):empty('wallet','Пока без записей','Добавляй траты по мере появления. Остатки бюджета обновятся автоматически.',button('+ Первый расход','add-expense','small secondary')))+'</section></div><div class="stack"><section class="panel">'+panelHead('На что откладываем')+(b.goalAllocations.filter(g=>g.target>0).length?b.goalAllocations.filter(g=>g.target>0).map(g=>'<div class="allocation"><div class="allocation-top"><strong>'+esc(g.title)+'</strong><strong>'+money(g.allocation)+'</strong></div><p>На этот месяц · ещё до цели '+money(g.remaining)+'</p><p>По этой цели потрачено '+money(g.spent)+' · остаток плана '+money(g.budgetRemaining)+'</p></div>').join(''):empty('target','Деньгам нужна цель','Добавь цель с суммой. Помощник учтёт её при распределении дохода.',button('+ Добавить цель','add-goal','small secondary')))+'</section><div class="insight">'+icon('spark')+'<div><h3>Бюджет подстраивается под тебя</h3><p>Доли можно изменить в любой момент. Цели получают деньги по приоритету и в пределах нужной суммы. Записанные траты уменьшают остаток своей категории.</p></div></div></div></div>';
+    const b=budget(), now=nowDate(),monthLength=new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate();
+    const days=month===now.slice(0,7)?monthLength-Number(now.slice(8))+1:month>now.slice(0,7)?monthLength:0;
+    const daily=days?Math.floor(Math.round(b.freeToSpend*100)/days)/100:0;
+    const actionsHtml='<div class="finance-actions">'+button(icon('plus')+' Доход','add-income','secondary')+button(icon('plus')+' Расход','add-expense')+'</div>';
+    const warnings=(b.mandatoryShortfall?'<div class="notice warning">На обязательные суммы не хватает '+money(b.mandatoryShortfall)+'. Добавь поступление или скорректируй суммы.</div>':'')+(b.protectionShortfall?'<div class="notice warning">Расходы затронули отложенные деньги: сейчас не покрыто '+money(b.protectionShortfall)+'. Свободных денег пока нет.</div>':'')+(b.deficit?'<div class="notice warning">Расходы превысили доход на '+money(b.deficit)+'.</div>':'');
+    return head('Деньги с намерением.','Обязательное — отложено. Свободное — видно.',actionsHtml)+currencyStrip()+'<p class="currency-note">'+currencies[selectedCurrency()]+'. BYN, USD и RUB считаются отдельно, без пересчёта по курсу. Старые записи без валюты сохранены в RUB.</p><div class="stats">'+stat('Все поступления',money(b.income),'Зарплата '+money(b.salaryIncome)+' · ещё '+money(b.additionalIncome),'wallet')+stat('Всего осталось',money(b.available),'Потрачено '+money(b.spent),'arrow')+stat('Свободно тратить',money(b.freeToSpend),'За вычетом отложенного','target')+'</div>'+warnings+'<div class="free-budget"><div><p class="eyebrow">'+(days?'ОРИЕНТИР ДО КОНЦА МЕСЯЦА':'МЕСЯЦ ЗАВЕРШЁН')+'</p><h2>'+(days?money(daily)+' <span>в день</span>':'Свободный остаток: '+money(b.freeToSpend))+'</h2><p>'+(days?'Свободный остаток распределён на '+days+' дней этого месяца. Это ориентир, а не ограничение.':'Можно посмотреть историю и спланировать следующий месяц.')+'</p></div><span class="free-budget-icon">'+icon('spark')+'</span></div><div class="columns"><div class="stack">'+commitmentPanel(b)+'<section class="panel">'+panelHead('Дополнительные поступления')+financialHistory('income')+'</section><section class="panel">'+panelHead('История расходов')+financialHistory('expense')+'</section></div><div class="stack"><section class="panel"><div class="panel-head"><h2>Зарплата и план</h2><button type="button" class="text-link" data-action="edit-budget">Изменить ↗</button></div>'+(b.income?budgetLines(b,true):empty('wallet','Укажи зарплату за месяц','Дополнительные поступления записываются отдельно и тоже увеличивают бюджет.',button('Указать зарплату','edit-budget','small secondary')))+'<p class="status-note">Сначала обязательные суммы, потом '+b.reservePercent+'% остатка в резерв и '+b.goalsPercent+'% следующего остатка на цели. Неиспользованное остаётся свободным. Проценты можно изменить.</p></section><section class="panel">'+panelHead('На твои цели')+(b.goalAllocations.some(g=>g.target>0)?b.goalAllocations.filter(g=>g.target>0).map(g=>'<div class="allocation"><div class="allocation-top"><strong>'+esc(g.title)+'</strong><strong>'+money(g.allocation)+'</strong></div><p>План на месяц · оплачено '+money(g.spent)+'</p><p>Остаток плана '+money(g.budgetRemaining)+' · до цели '+money(g.remaining)+'</p></div>').join(''):empty('target','Для будущего важного','Укажи денежную цель в '+selectedCurrency()+', и она появится в плане.',button('+ Добавить цель','add-goal','small secondary')))+'</section>'+moneyAdvice(b,days)+'</div></div>';
   }
   function settingsView() {
     const s=settings(), status=ai.getStatus();
@@ -89,6 +117,7 @@
     document.querySelectorAll('[data-view]').forEach(el=>{el.classList.toggle('active',el.dataset.view===view);el.setAttribute('aria-current',el.dataset.view===view?'page':'false');});
     $('monthPicker').value=month;
     $('content').innerHTML=view==='overview'?overview():view==='day'?head('День в твоём ритме.',fmtDate(day,{weekday:'long',day:'numeric',month:'long'})+' · меняй дела, остальное пересчитается.',button(icon('plus')+' Добавить дело','add-task'))+dayPanel():view==='goals'?goalsView():view==='money'?moneyView():settingsView();
+    if(lastRenderedView!==view){lastRenderedView=view;$('content').classList.remove('view-enter');void $('content').offsetWidth;$('content').classList.add('view-enter');}
     $('syncShort').textContent={local:'На этом устройстве',synced:'Всё синхронизировано',offline:'Сохранено на устройстве',loading:'Подключение…',syncing:'Синхронизирую…',error:'Проверь синхронизацию'}[state.status]||'Сохраняю…';
     $('syncDetail').textContent=syncText();$('syncDot').className=state.status==='synced'?'online':state.status==='error'||state.status==='offline'?'warning':'';
     $('accountButton').textContent=state.user?'Выйти из аккаунта':'Войти через Google';$('accountEmail').textContent=state.user?.email||'';
@@ -126,30 +155,82 @@
       toast('Дело сохранено на '+fmtDate(chosenDate)+'. План пересчитан.');
     });
   }
+  function readAmount(data,name,zero=false) {
+    const value=Number(data.get(name)||0);
+    if(!Number.isFinite(value)||value<(zero?0:0.01)||value>1000000000)throw new Error('Проверь сумму: она должна быть '+(zero?'неотрицательной.':'больше нуля.'));
+    return Math.round((value+Number.EPSILON)*100)/100;
+  }
   function goalEditor(goal) {
-    const g=goal||{};
-    openEditor(goal?'Изменить цель':'Цель на '+monthLabel(),field('Чего хочешь достичь','title','text',g.title||'','required maxlength="100" placeholder="Например, запустить свой проект"')+'<label class="field">Результат к концу месяца<textarea name="outcome" maxlength="500" placeholder="Как ты поймёшь, что цель достигнута?">'+esc(g.outcome||'')+'</textarea></label><div class="field-row">'+field('Нужно денег, ₽','target','number',g.target||'','min="0" max="1000000000" step="0.01" placeholder="Необязательно"')+field('Уже накоплено, ₽','saved','number',g.saved||'','min="0" max="1000000000" step="0.01" placeholder="0"')+'</div>'+selectField('Приоритет в бюджете','priority',[['2','Высокий'],['1','Обычный'],['0','Низкий']],String(g.priority??1)),async data=>{
-      const title=String(data.get('title')).trim();if(!title)throw new Error('Напиши название цели.');
-      store.put({...g,id:g.id||uid(),kind:'goal',month,title,outcome:String(data.get('outcome')||'').trim(),target:Number(data.get('target')||0),saved:Number(data.get('saved')||0),priority:Number(data.get('priority')),createdAt:g.createdAt||Date.now()});toast('Цель сохранена. Бюджет обновлён.');
+    const g=goal||{},c=goal?recordCurrency(g):selectedCurrency();
+    openEditor(goal?'Изменить цель':'Цель на '+monthLabel(),field('Чего хочешь достичь','title','text',g.title||'','required maxlength="100" placeholder="Например, запустить свой проект"')+'<label class="field">Результат к концу месяца<textarea name="outcome" maxlength="500" placeholder="Как ты поймёшь, что цель достигнута?">'+esc(g.outcome||'')+'</textarea></label>'+currencyField(c)+'<div class="field-row">'+field('Нужная сумма','target','number',g.target||'','min="0" max="1000000000" step="0.01" placeholder="Необязательно"')+field('Уже накоплено','saved','number',g.saved||'','min="0" max="1000000000" step="0.01" placeholder="0"')+'</div>'+selectField('Приоритет в бюджете','priority',[['2','Высокий'],['1','Обычный'],['0','Низкий']],String(g.priority??1))+'<p class="status-note">Суммы указаны в выбранной валюте. Смена валюты не пересчитывает число по курсу.</p>',async data=>{
+      const title=String(data.get('title')).trim(),currency=String(data.get('currency'));if(!title)throw new Error('Напиши название цели.');
+      if(!Object.hasOwn(currencies,currency))throw new Error('Выбери валюту.');
+      const linked=g.id&&Object.values(state.records).some(r=>r.kind==='expense'&&r.goalId===g.id);
+      if(linked&&currency!==recordCurrency(g))throw new Error('У цели уже есть расходы. Создай отдельную цель для другой валюты, чтобы сохранить их учёт.');
+      store.put({...g,id:g.id||uid(),kind:'goal',month,currency,title,outcome:String(data.get('outcome')||'').trim(),target:readAmount(data,'target',true),saved:readAmount(data,'saved',true),priority:Number(data.get('priority')),createdAt:g.createdAt||Date.now()});toast('Цель сохранена. Бюджет обновлён.');
     });
   }
   function budgetEditor() {
-    const b=budgetConfig();
-    openEditor('Доход и распределение',field('Доход за '+esc(monthLabel())+', ₽','income','number',b.income||'','required min="0" max="1000000000" step="0.01" placeholder="Сумма зарплаты и других поступлений"')+'<div class="field-row">'+field('Обязательные траты, %','essentialPercent','number',b.essentialPercent,'required min="0" max="100" step="1"')+field('Резерв, %','reservePercent','number',b.reservePercent,'required min="0" max="100" step="1"')+'</div><p class="status-note">Начальные 50% и 20% — редактируемый шаблон. Остаток распределяется на денежные цели по приоритету; лишнее остаётся свободным. Каждый месяц доход указывается отдельно.</p>',async data=>{
-      const e=Number(data.get('essentialPercent')),r=Number(data.get('reservePercent'));if(e+r>100)throw new Error('Сумма долей не может быть больше 100%.');
-      store.put({id:'budget-'+month,kind:'budget',month,income:Number(data.get('income')),essentialPercent:e,reservePercent:r});toast('Зарплата распределена. Суммы можно менять.');
+    const c=selectedCurrency(),b=budgetConfig(c);
+    openEditor('Зарплата и план · '+c,field('Зарплата за '+esc(monthLabel())+', '+c,'income','number',b.income||'','required min="0" max="1000000000" step="0.01" placeholder="Сумма зарплаты"')+'<div class="field-row">'+field('В резерв, %','reservePercent','number',b.reservePercent??20,'required min="0" max="100" step="1"','От остатка после обязательных сумм.')+field('На цели, %','goalsPercent','number',b.goalsPercent??20,'required min="0" max="100" step="1"','От остатка после резерва.')+'</div><p class="status-note">Подарки, подработки и другие поступления добавляются отдельно кнопкой «Доход». Обязательные суммы задаются в разделе «Обязательно отложить» и получают деньги первыми.</p>',async data=>{
+      const r=Number(data.get('reservePercent')),g=Number(data.get('goalsPercent'));if(!Number.isFinite(r)||!Number.isFinite(g)||r<0||r>100||g<0||g>100)throw new Error('Процент должен быть от 0 до 100.');
+      store.put({...b,id:b.id||'budget-'+month+'-'+c,kind:'budget',month,currency:c,income:readAmount(data,'income',true),reservePercent:r,goalsPercent:g});toast('Зарплата и распределение сохранены.');
     });
   }
-  function expenseEditor(expense) {
-    const e=expense||{},goals=records('goal');
-    const cats=[['essentials','Обязательные расходы'],['flexible','Свободные деньги'],['reserve','Резерв'],...goals.filter(g=>Number(g.target)>0).map(g=>['goal:'+g.id,'Цель: '+g.title])];
-    if(e.category==='goal'&&!goals.some(g=>g.id===e.goalId&&g.target>0))cats.push(['goal:'+e.goalId,'Цель (архив)']);
-    openEditor(expense?'Изменить расход':'Записать расход',field('На что потрачено','title','text',e.title||'','required maxlength="100" placeholder="Например, продукты"')+'<div class="field-row">'+field('Сумма, ₽','amount','number',e.amount||'','required min="0.01" max="1000000000" step="0.01"')+field('Дата','date','date',e.date||day,'required')+'</div>'+selectField('Из какой части бюджета','category',cats,e.category==='goal'?'goal:'+e.goalId:e.category||'essentials'),async data=>{
-      const title=String(data.get('title')).trim();if(!title)throw new Error('Укажи, на что потрачены деньги.');
-      const date=String(data.get('date')),targetMonth=date.slice(0,7),category=String(data.get('category')), record={...e,id:e.id&&e.month===targetMonth?e.id:uid(),kind:'expense',month:targetMonth,date,title,amount:Number(data.get('amount')),category:category.startsWith('goal:')?'goal':category,goalId:category.startsWith('goal:')?category.slice(5):'',createdAt:e.createdAt||Date.now()};
-      if(record.goalId&&getRecord(record.goalId)?.month!==targetMonth)throw new Error('Выбери цель и дату из одного месяца.');
-      store.put(record);if(e.id&&e.id!==record.id)store.remove(e.id);if(targetMonth!==month){day=date;month=targetMonth;store.setPeriod(month,day);}toast('Расход записан. Остатки обновлены.');
+  function incomeEditor(income) {
+    const item=income||{};
+    openEditor(income?'Изменить поступление':'Дополнительный доход',field('Откуда деньги','title','text',item.title||'','required maxlength="100" placeholder="Подарок, подработка, возврат…"')+currencyField(income?recordCurrency(item):selectedCurrency())+'<div class="field-row">'+field('Сумма','amount','number',item.amount||'','required min="0.01" max="1000000000" step="0.01"')+field('Дата поступления','date','date',item.date||day,'required')+'</div><p class="status-note">Поступление прибавится к зарплате в своей валюте. Если деньги уже учтены в зарплате, повторно добавлять их не нужно.</p>',async data=>{
+      const title=String(data.get('title')).trim(),date=String(data.get('date')),currency=String(data.get('currency')),targetMonth=date.slice(0,7);
+      if(!title||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Object.hasOwn(currencies,currency))throw new Error('Проверь название, дату и валюту.');
+      const record={...item,id:item.id&&item.month===targetMonth?item.id:uid(),kind:'income',month:targetMonth,currency,date,title,amount:readAmount(data,'amount'),createdAt:item.createdAt||Date.now()};
+      store.put(record);if(item.id&&item.id!==record.id)store.remove(item.id);
+      if(targetMonth!==month){day=date;month=targetMonth;store.setPeriod(month,day);}setCurrency(currency);toast('Поступление добавлено. Бюджет пересчитан.');
     });
+  }
+  function commitmentEditor(commitment) {
+    const item=commitment||{};
+    openEditor(commitment?'Изменить обязательную сумму':'Обязательно отложить',field('На что откладываем','title','text',item.title||'','required maxlength="100" placeholder="Репетиторы, проезд, связь…"')+currencyField(commitment?recordCurrency(item):selectedCurrency())+'<div class="field-row">'+field('Сумма на месяц','amount','number',item.amount||'','required min="0.01" max="1000000000" step="0.01" placeholder="Например, 680"')+field('До какого числа','dueDay','number',item.dueDay||'','min="1" max="31" step="1" placeholder="Необязательно"')+'</div><p class="status-note">Сумма будет защищена от свободных трат. Это ещё не расход: когда оплатишь, нажми «Записать оплату» у этого пункта. При нехватке денег пункты получают их по порядку добавления.</p>',async data=>{
+      const title=String(data.get('title')).trim(),currency=String(data.get('currency')),dueDay=Number(data.get('dueDay')||0);
+      if(!title||!Object.hasOwn(currencies,currency)||!Number.isInteger(dueDay)||dueDay<0||dueDay>31)throw new Error('Проверь название, валюту и число месяца.');
+      if(item.id&&currency!==recordCurrency(item)&&Object.values(state.records).some(r=>r.kind==='expense'&&r.commitmentId===item.id))throw new Error('У пункта уже есть оплаты. Для другой валюты создай отдельный пункт.');
+      store.put({...item,id:item.id||uid(),kind:'commitment',month,currency,title,amount:readAmount(data,'amount'),dueDay,createdAt:item.createdAt||Date.now()});setCurrency(currency);toast('Обязательная сумма отложена в плане.');
+    });
+  }
+  function expenseCategories(currency,date,item={}) {
+    const matching=Object.values(state.records).filter(r=>r.month===date.slice(0,7)&&recordCurrency(r)===currency);
+    const options=[['flexible','Свободные деньги'],['reserve','Резерв'],...matching.filter(r=>r.kind==='commitment').map(r=>['commitment:'+r.id,'Обязательное: '+r.title]),...matching.filter(r=>r.kind==='goal'&&Number(r.target)>0).map(r=>['goal:'+r.id,'Цель: '+r.title])];
+    if(item.id&&recordCurrency(item)===currency&&item.month===date.slice(0,7)){
+      if(item.category==='essentials'&&!item.commitmentId)options.push(['essentials','Прежний обязательный расход']);
+      for(const [kind,id,label] of [['commitment',item.commitmentId,item.commitmentTitle||'Обязательное (архив)'],['goal',item.goalId,'Цель (архив)']])if(id&&!options.some(([v])=>v===kind+':'+id))options.push([kind+':'+id,label]);
+    }
+    return options;
+  }
+  function expenseEditor(expense) {
+    const e=expense||{},c=expense?recordCurrency(e):selectedCurrency(),date=e.date||day;
+    const category=e.commitmentId?'commitment:'+e.commitmentId:e.category==='goal'?'goal:'+e.goalId:e.category||'flexible';
+    openEditor(expense?.id?'Изменить расход':'Записать расход',field('На что потрачено','title','text',e.title||'','required maxlength="100" placeholder="Например, продукты"')+currencyField(c)+'<div class="field-row">'+field('Сумма','amount','number',e.amount||'','required min="0.01" max="1000000000" step="0.01"')+field('Дата','date','date',date,'required')+'</div><div id="expenseCategoryField">'+selectField('Из какой части бюджета','category',expenseCategories(c,date,e),category)+'</div><p class="status-note">Для оплаты репетиторов или проезда выбери нужный обязательный пункт. Обычные траты уменьшают свободные деньги.</p>',async data=>{
+      const title=String(data.get('title')).trim(),date=String(data.get('date')),currency=String(data.get('currency')),targetMonth=date.slice(0,7),category=String(data.get('category'));
+      if(!title||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Object.hasOwn(currencies,currency))throw new Error('Проверь название, дату и валюту.');
+      const commitmentId=category.startsWith('commitment:')?category.slice(11):'',goalId=category.startsWith('goal:')?category.slice(5):'';
+      for(const [id,kind,original] of [[commitmentId,'commitment',e.commitmentId],[goalId,'goal',e.goalId]]){
+        if(!id)continue;const linked=getRecord(id);
+        if(linked?(linked.kind!==kind||linked.month!==targetMonth||recordCurrency(linked)!==currency):!(e.id&&id===original&&e.month===targetMonth&&recordCurrency(e)===currency))throw new Error('Выбери пункт из того же месяца и в той же валюте.');
+      }
+      const record={...e,id:e.id&&e.month===targetMonth?e.id:uid(),kind:'expense',month:targetMonth,currency,date,title,amount:readAmount(data,'amount'),category:commitmentId?'essentials':goalId?'goal':category,goalId,commitmentId,commitmentTitle:commitmentId?(getRecord(commitmentId)?.title||e.commitmentTitle||''):'',createdAt:e.createdAt||Date.now()};
+      store.put(record);if(e.id&&e.id!==record.id)store.remove(e.id);if(targetMonth!==month){day=date;month=targetMonth;store.setPeriod(month,day);}setCurrency(currency);toast('Расход записан. Остатки обновлены.');
+    });
+    for(const el of $('editorForm').querySelectorAll('[name="currency"],[name="date"]'))el.addEventListener('change',()=>{
+      const f=$('editorForm'),previous=f.elements.category.value,options=expenseCategories(f.elements.currency.value,f.elements.date.value,e);
+      $('expenseCategoryField').innerHTML=selectField('Из какой части бюджета','category',options,options.some(([v])=>v===previous)?previous:'flexible');
+    });
+  }
+  function copyCommitments() {
+    const date=new Date(month+'-01T12:00:00Z');date.setUTCMonth(date.getUTCMonth()-1);const previous=date.toISOString().slice(0,7),c=selectedCurrency();
+    const signature=r=>JSON.stringify([r.title.trim().toLowerCase(),r.amount,r.dueDay||0]);
+    const existing=new Set(currencyRecords('commitment').map(signature));
+    const source=Object.values(state.records).filter(r=>r.kind==='commitment'&&r.month===previous&&recordCurrency(r)===c).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+    let count=0;for(const item of source){const key=signature(item);if(existing.has(key))continue;existing.add(key);store.put({...item,id:uid(),month,createdAt:Date.now()+count++});}
+    toast(count?'Добавлено обязательных сумм: '+count+'. Оплаты прошлого месяца не перенесены.':'В прошлом месяце нет новых для переноса сумм в '+c+'.');
   }
   async function generateGoal(id) {
     if(planningGoal)return;
@@ -174,7 +255,7 @@
     const record=getRecord(id);if(!record)return;
     const removed=[record,...(record.kind==='goal'?Object.values(state.records).filter(r=>r.kind==='task'&&r.goalId===id):[])];
     const scope=state.user?.uid||'anonymous';removed.forEach(r=>store.remove(r.id));
-    toast(record.kind==='goal'?'Цель и её шаги удалены.':record.kind==='task'?'Дело удалено. План пересчитан.':'Расход удалён.',()=>{if((state.user?.uid||'anonymous')!==scope){toast('Вернись в исходный аккаунт для восстановления.');return;}removed.forEach(r=>store.put(r));toast('Записи восстановлены.');});
+    toast(record.kind==='goal'?'Цель и её шаги удалены.':record.kind==='task'?'Дело удалено. План пересчитан.':record.kind==='income'?'Поступление удалено. Бюджет пересчитан.':record.kind==='commitment'?'Обязательная сумма удалена. Записанные оплаты сохранены.':'Расход удалён.',()=>{if((state.user?.uid||'anonymous')!==scope){toast('Вернись в исходный аккаунт для восстановления.');return;}removed.forEach(r=>store.put(r));toast('Записи восстановлены.');});
   }
   function changeDay(value) {if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return;day=value;month=day.slice(0,7);store.setPeriod(month,day);render();}
   function shiftDay(delta) {const d=new Date(day+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+delta);changeDay(d.toISOString().slice(0,10));}
@@ -184,6 +265,11 @@
     if(action==='add-task')taskEditor();else if(action==='edit-task')taskEditor(getRecord(id));else if(action==='goal-task')taskEditor(null,id);
     else if(action==='add-goal')goalEditor();else if(action==='edit-goal')goalEditor(getRecord(id));else if(action==='plan-goal')void generateGoal(id);
     else if(action==='edit-budget')budgetEditor();else if(action==='add-expense')expenseEditor();else if(action==='edit-expense')expenseEditor(getRecord(id));
+    else if(action==='currency')setCurrency(id);
+    else if(action==='add-income')incomeEditor();else if(action==='edit-income')incomeEditor(getRecord(id));
+    else if(action==='add-commitment')commitmentEditor();else if(action==='edit-commitment')commitmentEditor(getRecord(id));
+    else if(action==='copy-commitments')copyCommitments();
+    else if(action==='pay-commitment'){const c=getRecord(id),allocation=budget().commitmentAllocations.find(r=>r.id===id);if(c)expenseEditor({title:c.title,amount:Math.max(0.01,c.amount-(allocation?.spent||0)),currency:recordCurrency(c),date:day,category:'essentials',commitmentId:c.id,commitmentTitle:c.title});}
     else if(action==='delete')deleteRecord(id);else if(action==='account')void store.signInOut().catch(e=>toast(e.message));
     else if(action==='open-task-day'){const task=getRecord(id);if(task){changeDay(task.date);location.hash='day';}}
     else if(action==='prev-day')shiftDay(-1);else if(action==='next-day')shiftDay(1);else if(action==='today')changeDay(nowDate());

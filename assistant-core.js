@@ -17,8 +17,8 @@
     return Math.min(maximum, Math.max(minimum, value));
   }
 
-  // Parse decimal rubles before doing arithmetic, including values such as 1.005.
-  // Every subsequent budget calculation uses integer kopecks.
+  // Parse decimal currency before doing arithmetic, including values such as 1.005.
+  // All supported currencies have two decimal places; calculations use cents.
   function toCents(value) {
     if (typeof value !== 'number' && typeof value !== 'string') return 0;
     var text = String(value).trim().replace(/\s/g, '').replace(',', '.');
@@ -206,28 +206,62 @@
     return 'flexible';
   }
 
+  function currencyCode(value) {
+    var code = String(value || 'RUB').toUpperCase().trim();
+    return ['RUB', 'BYN', 'USD'].indexOf(code) >= 0 ? code : 'RUB';
+  }
+
+  function budgetEntries(entries, currency) {
+    return (Array.isArray(entries) ? entries : []).filter(function (entry) {
+      if (!entry || typeof entry !== 'object') return false;
+      // Missing currency belongs to the original RUB ledger. It is never
+      // relabelled when a user switches their selected currency.
+      if (currency === null) return true;
+      var code = String(entry.currency || 'RUB').toUpperCase().trim();
+      return code === currency;
+    });
+  }
+
   /**
-   * Creates a salary plan, not a bank transfer. Goals receive at most their unmet
-   * target; any unused goal budget becomes flexible money. Expenses consume their
-   * chosen envelope without silently moving money between envelopes. Negative
-   * balances expose overruns while available/deficit show the real cash position.
+   * Creates a plan, not a bank transfer. With commitments, fixed obligations are
+   * funded first, reservePercent applies to the remainder, and goalsPercent
+   * (default 20) applies after the reserve. Without commitments the original
+   * percentage-based API is preserved. Currencies are separate ledgers; no
+   * conversion or exchange rate is implied. Goals receive at most their unmet
+   * target. Negative envelope balances expose overruns; freeToSpend protects
+   * funded but unpaid obligations and savings, even when another item overruns.
    */
   function allocateBudget(input) {
     input = input || {};
-    var income = toCents(input.income);
-    var essentialBasis = clamp(toCents(input.essentialPercent === undefined ? 50 : input.essentialPercent), 0, 10000);
-    var reserveBasis = clamp(toCents(input.reservePercent === undefined ? 20 : input.reservePercent), 0, 10000 - essentialBasis);
-    var goalBasis = input.goalsPercent === undefined
-      ? 10000 - essentialBasis - reserveBasis
-      : clamp(toCents(input.goalsPercent), 0, 10000 - essentialBasis - reserveBasis);
-    var essentialPlan = percentageCents(income, essentialBasis);
-    var reservePlan = percentageCents(income, reserveBasis);
-    var goalPool = input.goalsPercent === undefined
-      ? income - essentialPlan - reservePlan
-      : percentageCents(income, goalBasis);
-    var goals = (Array.isArray(input.goals) ? input.goals : []).filter(function (goal) {
-      return goal && typeof goal === 'object';
-    }).map(function (goal, index) {
+    var currency = input.currency === undefined ? null : currencyCode(input.currency);
+    var salaryIncome = toCents(input.income);
+    var additionalIncome = sumCents(budgetEntries(input.incomes, currency).map(function (item) { return toCents(item.amount); }));
+    var income = sumCents([salaryIncome, additionalIncome]);
+    var fixedMode = Object.prototype.hasOwnProperty.call(input, 'commitments');
+    var commitments = budgetEntries(input.commitments, currency).map(function (commitment) {
+      return { source: commitment, requested: toCents(commitment.amount), planned: 0, spent: 0 };
+    });
+    var mandatoryRequested = sumCents(commitments.map(function (item) { return item.requested; }));
+    var essentialBasis = fixedMode ? 0 : clamp(toCents(input.essentialPercent === undefined ? 50 : input.essentialPercent), 0, 10000);
+    var reserveBasis = clamp(toCents(input.reservePercent === undefined ? 20 : input.reservePercent), 0, fixedMode ? 10000 : 10000 - essentialBasis);
+    var goalBasis = fixedMode
+      ? clamp(toCents(input.goalsPercent === undefined ? 20 : input.goalsPercent), 0, 10000)
+      : input.goalsPercent === undefined
+        ? 10000 - essentialBasis - reserveBasis
+        : clamp(toCents(input.goalsPercent), 0, 10000 - essentialBasis - reserveBasis);
+    var essentialPlan = fixedMode ? Math.min(income, mandatoryRequested) : percentageCents(income, essentialBasis);
+    var obligationPool = essentialPlan;
+    commitments.forEach(function (item) {
+      item.planned = Math.min(item.requested, obligationPool);
+      obligationPool -= item.planned;
+    });
+    var reservePlan = percentageCents(fixedMode ? income - essentialPlan : income, reserveBasis);
+    var goalPool = fixedMode
+      ? percentageCents(income - essentialPlan - reservePlan, goalBasis)
+      : input.goalsPercent === undefined
+        ? income - essentialPlan - reservePlan
+        : percentageCents(income, goalBasis);
+    var goals = budgetEntries(input.goals, currency).map(function (goal, index) {
       var target = toCents(goal.target);
       var saved = toCents(goal.saved);
       return {
@@ -256,17 +290,32 @@
       flexible: income - essentialPlan - reservePlan - goalPlan
     };
     var spending = { essentials: 0, reserve: 0, goals: 0, flexible: 0 };
-    (Array.isArray(input.expenses) ? input.expenses : []).forEach(function (expense) {
-      if (!expense || typeof expense !== 'object') return;
+    budgetEntries(input.expenses, currency).forEach(function (expense) {
       var amount = toCents(expense.amount);
       var category = expenseCategory(expense.category);
       spending[category] = Math.min(MAX_CENTS, spending[category] + amount);
-      if (category === 'goals' && expense.goalId !== undefined && expense.goalId !== null) {
-        var goal = goals.find(function (item) { return String(item.source.id) === String(expense.goalId); });
-        if (goal) goal.spent = Math.min(MAX_CENTS, goal.spent + amount);
+      if (category === 'essentials') {
+        var commitment = expense.commitmentId === undefined || expense.commitmentId === null ? null
+          : commitments.find(function (item) { return String(item.source.id) === String(expense.commitmentId); });
+        if (commitment) commitment.spent = sumCents([commitment.spent, amount]);
+      }
+      if (category === 'goals') {
+        var goal = expense.goalId === undefined || expense.goalId === null ? null
+          : goals.find(function (item) { return String(item.source.id) === String(expense.goalId); });
+        if (goal) goal.spent = sumCents([goal.spent, amount]);
       }
     });
+    // Only a payment explicitly linked to a protected item consumes its funds.
+    // Unlinked spending and overruns cannot erase another item's protection.
     var totalSpent = sumCents(Object.keys(spending).map(function (key) { return spending[key]; }));
+    var mandatoryRemaining = fixedMode
+      ? sumCents(commitments.map(function (item) { return Math.max(0, item.planned - item.spent); }))
+      : Math.max(0, essentialPlan - spending.essentials);
+    var goalProtected = fixedMode
+      ? sumCents(goals.map(function (goal) { return Math.max(0, goal.allocation - goal.spent); }))
+      : Math.max(0, goalPlan - spending.goals);
+    var protectedRemaining = sumCents([mandatoryRemaining, Math.max(0, reservePlan - spending.reserve), goalProtected]);
+    var available = Math.max(0, income - totalSpent);
     var envelopes = {};
     var allocations = {};
     Object.keys(planned).forEach(function (key) {
@@ -278,17 +327,37 @@
       allocations[key] = rubles(planned[key]);
     });
     return {
+      currency: currency,
+      salaryIncome: rubles(salaryIncome),
+      additionalIncome: rubles(additionalIncome),
       income: rubles(income),
       spent: rubles(totalSpent),
-      available: rubles(Math.max(0, income - totalSpent)),
+      available: rubles(available),
       deficit: rubles(Math.max(0, totalSpent - income)),
+      mandatoryRequested: rubles(mandatoryRequested),
+      mandatoryFunded: rubles(fixedMode ? essentialPlan : 0),
+      mandatoryShortfall: rubles(fixedMode ? Math.max(0, mandatoryRequested - essentialPlan) : 0),
+      mandatoryRemaining: rubles(mandatoryRemaining),
+      protectedRemaining: rubles(protectedRemaining),
+      protectionShortfall: rubles(Math.max(0, protectedRemaining - available)),
+      freeToSpend: rubles(Math.max(0, available - protectedRemaining)),
       totalAllocated: rubles(income),
       unallocated: 0,
-      essentialsPercent: essentialBasis / 100,
+      essentialsPercent: fixedMode ? (income > 0 ? Math.round(essentialPlan / income * 10000) / 100 : 0) : essentialBasis / 100,
       reservePercent: reserveBasis / 100,
       goalsPercent: goalBasis / 100,
       envelopes: envelopes,
       allocations: allocations,
+      commitmentAllocations: commitments.map(function (item) {
+        return Object.assign({}, item.source, {
+          amount: rubles(item.requested),
+          requested: rubles(item.requested),
+          planned: rubles(item.planned),
+          spent: rubles(item.spent),
+          remaining: rubles(item.planned - item.spent),
+          shortfall: rubles(item.requested - item.planned)
+        });
+      }),
       goalAllocations: goals.map(function (goal) {
         return Object.assign({}, goal.source, {
           target: rubles(goal.target),

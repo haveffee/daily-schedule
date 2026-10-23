@@ -12,10 +12,12 @@ ROOT = Path(__file__).resolve().parent
 REQUIRED = (
     "index.html",
     "assistant.css",
+    "assistant-finance.css",
     "assistant-ui.js",
     "assistant-core.js",
     "assistant-store.js",
     "assistant-ai.js",
+    "assistant-extras.js",
     "firebase-config.js",
     "favicon.svg",
     "apple-touch-icon.png",

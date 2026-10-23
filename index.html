@@ -11,12 +11,14 @@
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./assistant.css?v=2">
+  <link rel="stylesheet" href="./assistant.css?v=3">
+  <link rel="stylesheet" href="./assistant-finance.css?v=3">
   <script defer src="./firebase-config.js"></script>
-  <script defer src="./assistant-core.js?v=2"></script>
+  <script defer src="./assistant-core.js?v=3"></script>
   <script defer src="./assistant-store.js?v=2"></script>
   <script defer src="./assistant-ai.js?v=2"></script>
-  <script defer src="./assistant-ui.js?v=2"></script>
+  <script defer src="./assistant-extras.js?v=3"></script>
+  <script defer src="./assistant-ui.js?v=3"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">К содержимому</a>
@@ -33,7 +35,7 @@
     <div class="sidebar-bottom"><div class="sync-indicator"><i id="syncDot"></i><span id="syncShort">На этом устройстве</span></div><p id="syncDetail">Войди в Google на телефоне и компьютере, чтобы всё было рядом.</p><button id="accountButton" class="button secondary full" type="button">Войти через Google</button><small id="accountEmail"></small></div>
   </aside>
   <div class="workspace">
-    <header class="topbar"><span class="topbar-title">Твоё личное пространство</span><div class="topbar-controls"><span class="timezone">Москва · UTC+3</span><label class="month-picker"><span class="sr-only">Выбрать месяц</span><input type="month" id="monthPicker" required></label><a class="avatar" id="syncBadge" href="#settings" aria-label="Настройки и синхронизация">H</a></div></header>
+    <header class="topbar"><span class="topbar-title">Твоё личное пространство</span><div class="topbar-controls"><span class="timezone">Минск · UTC+3</span><label class="month-picker"><span class="sr-only">Выбрать месяц</span><input type="month" id="monthPicker" required></label><a class="avatar" id="syncBadge" href="#settings" aria-label="Настройки и синхронизация">H</a></div></header>
     <main id="main" tabindex="-1"><div id="content"></div></main>
     <footer>HVF <span>·</span> Место для твоих планов</footer>
   </div>
