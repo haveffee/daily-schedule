@@ -1,15 +1,12 @@
-name: Update daily schedule
+name: Deploy HVF assistant
 
 on:
   push:
-    paths-ignore:
-      - index.html
-  schedule:
-    - cron: "20 4 * * *"
+    branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -18,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  update-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -33,29 +30,28 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Generate today's schedule
-        run: python generate.py
-
-      - name: Commit and push updated index.html
+      - name: Check JavaScript and regression tests
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add index.html
+          for file in assistant-core.js assistant-ui.js assistant-ai.js assistant-store.js; do
+            node --check "$file"
+          done
+          node --test tests/*.test.cjs
 
-          if git diff --cached --quiet; then
-            echo "index.html has no changes to commit."
-          else
-            git commit -m "Update daily schedule"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
+      - name: Validate static application
+        run: python generate.py
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
 
+      - name: Prepare public application files
+        run: |
+          mkdir -p _site
+          cp index.html assistant.css assistant-core.js assistant-ui.js assistant-ai.js assistant-store.js firebase-config.js favicon.svg apple-touch-icon.png icon-192.png icon-512.png manifest.webmanifest _site/
+
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: .
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deployment
