@@ -18,6 +18,8 @@ REQUIRED = (
     "assistant-store.js",
     "assistant-ai.js",
     "assistant-extras.js",
+    "pwa.js",
+    "service-worker.js",
     "firebase-config.js",
     "favicon.svg",
     "apple-touch-icon.png",
