@@ -10,10 +10,11 @@ const pwaSource = fs.readFileSync(path.join(root, 'pwa.js'), 'utf8');
 const SCOPE = 'https://example.github.io/daily-schedule/';
 const turn = () => new Promise(resolve => setImmediate(resolve));
 
-function worker() {
+function worker(options = {}) {
   const events = new Map();
   const stores = new Map();
   const requests = [];
+  const notifications = [], opened = [];
   let network = async request => new Response('online:' + request.url);
   let claims = 0;
   const caches = {
@@ -42,15 +43,20 @@ function worker() {
   };
   const fetchMock = async request => { requests.push(request); return network(request); };
   const self = {
-    registration: { scope: SCOPE },
-    clients: { async claim() { claims++; } },
+    registration: { scope: SCOPE, async showNotification(title, settings) { notifications.push({ title, settings }); } },
+    clients: { async claim() { claims++; }, async matchAll() { return options.windows || []; }, async openWindow(url) { opened.push(url); } },
     addEventListener: (name, callback) => events.set(name, callback)
   };
   vm.runInNewContext(workerSource, { self, URL, Request, Response, Set, caches, fetch: fetchMock });
   return {
-    stores, requests, caches,
+    stores, requests, caches, notifications, opened,
     get claims() { return claims; },
     setNetwork(value) { network = value; },
+    async dispatch(name, data) {
+      let pending;
+      events.get(name)({ ...data, waitUntil(value) { pending = value; } });
+      await pending;
+    },
     async lifecycle(name) {
       let pending;
       events.get(name)({ waitUntil(value) { pending = value; } });
@@ -79,7 +85,7 @@ test('installation precaches a complete public shell under the project path only
   const sw = worker();
   await sw.lifecycle('install');
   const urls = sw.requests.map(request => request.url);
-  assert.equal(urls.length, 18);
+  assert.equal(urls.length, 21);
   for (const request of sw.requests) {
     assert.ok(request.url.startsWith(SCOPE));
     assert.equal(request.cache, 'reload');
@@ -171,6 +177,43 @@ test('cache storage failure does not block online responses', async () => {
   assert.match(await (await sw.fetch('./', { mode: 'navigate' })).text(), /online:/);
 });
 
+test('a push always displays a visible notification and ignores remote navigation URLs', async () => {
+  const sw = worker();
+  await sw.dispatch('push', { data: { json: () => ({ title: 'HVF', body: '18:00 · Урок', date: '2026-10-24', tag: 'lesson', url: 'https://evil.example/' }) } });
+  assert.equal(sw.notifications.length, 1);
+  const notification = sw.notifications[0];
+  assert.equal(notification.settings.body, '18:00 · Урок');
+  assert.equal(notification.settings.icon, SCOPE + 'icon-192.png');
+  let closed = false;
+  await sw.dispatch('notificationclick', { notification: { ...notification.settings, close() { closed = true; } } });
+  assert.equal(closed, true);
+  assert.deepEqual(sw.opened, [SCOPE + '#day/2026-10-24']);
+});
+
+test('a notification focuses an existing app without reloading its unfinished form', async () => {
+  const messages = [];
+  let focuses = 0;
+  const sw = worker({ windows: [
+    { url: 'https://example.github.io/another-project/', focus() { throw new Error('Wrong app'); } },
+    { url: SCOPE + '#money', postMessage(data) { messages.push(data); }, async focus() { focuses++; } }
+  ] });
+  await sw.dispatch('notificationclick', { notification: { data: { date: '2026-10-24' }, close() {} } });
+  assert.equal(focuses, 1);
+  assert.equal(messages[0].type, 'HVF_OPEN_REMINDER');
+  assert.equal(messages[0].date, '2026-10-24');
+  assert.equal(sw.opened.length, 0);
+});
+
+test('invalid push data still creates a safe visible fallback notification', async () => {
+  const sw = worker();
+  await sw.dispatch('push', { data: { json() { throw new Error('Malformed JSON'); } } });
+  assert.equal(sw.notifications.length, 1);
+  assert.match(sw.notifications[0].title, /HVF/);
+  assert.match(sw.notifications[0].settings.body, /Открой HVF/);
+  await sw.dispatch('notificationclick', { notification: { data: { date: 'https://evil.example' }, close() {} } });
+  assert.deepEqual(sw.opened, [SCOPE + '#day']);
+});
+
 function client(options = {}) {
   const events = new Map();
   const dispatched = [];
@@ -213,7 +256,7 @@ test('PWA registration uses a relative scope and never prompts or reloads on loa
   await page.events.get('load')();
   await turn();
   assert.equal(page.calls.length, 1);
-  assert.equal(page.calls[0].url, './service-worker.js');
+  assert.equal(page.calls[0].url, './service-worker.js?v=reminders-1');
   assert.equal(page.calls[0].settings.scope, './');
   assert.equal(page.calls[0].settings.updateViaCache, 'none');
   assert.equal(page.api.getStatus().offlineReady, true);

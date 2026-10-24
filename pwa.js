@@ -4,6 +4,13 @@
   const APPLE_HELP = "https://support.apple.com/guide/iphone/iph42ab2f3a7/ios";
   const INSTALL_HELP = "https://support.google.com/chrome/answer/9658361";
   const serviceWorker = navigator.serviceWorker;
+  if (serviceWorker && typeof serviceWorker.addEventListener === "function") {
+    serviceWorker.addEventListener("message", event => {
+      if (event.data && event.data.type === "HVF_OPEN_REMINDER") {
+        window.dispatchEvent(new CustomEvent("hvf-open-reminder", { detail: { date: event.data.date } }));
+      }
+    });
+  }
   const secure = window.isSecureContext === true;
   const displayMode = typeof window.matchMedia === "function"
     ? window.matchMedia("(display-mode: standalone)") : null;
@@ -102,7 +109,7 @@
     if (!state.supported) { publish(); return; }
     try {
       // Relative URLs retain a GitHub Pages project subpath.
-      registration = await serviceWorker.register("./service-worker.js", {
+      registration = await serviceWorker.register("./service-worker.js?v=reminders-1", {
         scope: "./", updateViaCache: "none"
       });
       state.updateReady = !!registration.waiting;

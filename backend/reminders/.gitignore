@@ -1,0 +1,7 @@
+node_modules/
+.wrangler/
+.dev.vars
+.env
+.vapid-private-key
+.vapid-public-key
+wrangler.local.jsonc

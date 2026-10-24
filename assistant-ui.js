@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const core = window.HVFCore, store = window.HVFStore, ai = window.HVFAI, planner = window.HVFPlanner, weekly = window.HVFWeekly;
+  const core = window.HVFCore, store = window.HVFStore, ai = window.HVFAI, planner = window.HVFPlanner, weekly = window.HVFWeekly, reminders = window.HVFReminders;
   const paths = {
     home:'M3 10 12 3l9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z',
     calendar:'M5 5h14a2 2 0 0 1 2 2v13H3V7a2 2 0 0 1 2-2ZM7 3v4m10-4v4M3 10h18m-13 4h2m4 0h2m-8 3h2',
@@ -10,6 +10,7 @@
     settings:'m9 3-1 3-3 1-2 3 2 3v4l3 1 2 3 3-2 4-1 1-3 3-2-2-3V6l-3-1-2-2-3 2Zm6 9a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
     plus:'M12 5v14M5 12h14', edit:'m16 3 5 5-12 12-6 1 1-6Zm-2 2 5 5', delete:'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7',
     clock:'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM12 7v5l3 2', spark:'m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5ZM20 2v4m-2-2h4',
+    bell:'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4',
     assistant:'M16 9a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM4 21v-2a8 8 0 0 1 16 0v2M3 7V5m-1 1h2m16-4v4m-2-2h4', arrow:'M5 12h14m-5-5 5 5-5 5', check:'m5 12 4 4L19 6', download:'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5'
   };
   const icon = (key) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="'+(paths[key]||paths.spark)+'"/></svg>';
@@ -17,7 +18,8 @@
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const uid = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)+Math.random().toString(36).slice(2);
   const nowDate = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Minsk',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-  let day = nowDate(), month = day.slice(0,7), state = store.getState(), view = 'overview', lastRenderedView = '', submitEditor = null, busy = false, planningGoal = '', toastTimer, undoAction, importantOnly = false, movePreview = null;
+  const reminderRouteDate = () => /^#day\/(\d{4}-\d{2}-\d{2})$/.exec(location.hash)?.[1]||'';
+  let day = planner.validDate(reminderRouteDate())?reminderRouteDate():nowDate(), month = day.slice(0,7), state = store.getState(), view = 'overview', lastRenderedView = '', submitEditor = null, busy = false, planningGoal = '', toastTimer, undoAction, importantOnly = false, movePreview = null, completionFlash = null, pendingReminderDate = '';
   const fmtDate = (date, options={day:'numeric',month:'long'}) => new Intl.DateTimeFormat('ru-RU',{...options,timeZone:'Europe/Minsk'}).format(new Date(date+'T12:00:00+03:00'));
   const monthLabel = () => fmtDate(month+'-01',{month:'long',year:'numeric'}).replace(' г.','');
   const currencies = {BYN:'Белорусский рубль',USD:'Доллар США',RUB:'Российский рубль'};
@@ -36,6 +38,16 @@
   const priorityNames = ['Низкий','Обычный','Высокий'];
   const priorityTag = (task) => '<span class="tag priority-'+planner.priorityValue(task)+'">'+priorityNames[planner.priorityValue(task)]+' приоритет</span>';
   const priorityField = (value) => selectField('Приоритет','priority',[['2','Высокий · коралловый'],['1','Обычный · зелёный'],['0','Низкий · серый']],String(planner.priorityValue(value)));
+  const reminderOptions = [['-1','Не напоминать'],['0','В момент начала'],['5','За 5 минут'],['10','За 10 минут'],['15','За 15 минут'],['30','За 30 минут'],['60','За час'],['1440','За день']];
+  const reminderField = (task) => selectField('Напоминание','reminderMinutes',reminderOptions,String(task.reminderMinutes??-1))+'<p class="status-note reminder-field-hint">Для напоминания укажи время начала. Уведомления включаются отдельно на каждом устройстве в <a class="text-link" href="#settings">настройках</a>.</p>';
+  function readReminder(data,at,previous) {
+    const raw=data.get('reminderMinutes'),value=raw===null?previous:raw;
+    if(value===undefined||value===null||String(value)==='-1'||value==='')return null;
+    const minutes=Number(value);if(!reminderOptions.some(([n])=>n!=='-1'&&Number(n)===minutes))throw new Error('Выбери время напоминания.');
+    if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(at))throw new Error('Для напоминания укажи время начала дела.');
+    return minutes;
+  }
+  const reminderTag = (task) => Number.isInteger(task.reminderMinutes)&&task.reminderMinutes>=0?'<span class="tag reminder-tag">'+icon('bell')+(task.reminderMinutes===0?'В начале':task.reminderMinutes===1440?'За день':task.reminderMinutes===60?'За час':'За '+task.reminderMinutes+' мин')+'</span>':'';
   function getTask(id) {
     if(getRecord(id)?.kind==='task')return getRecord(id);
     const date=String(id).slice(-10);
@@ -60,7 +72,7 @@
   }
   function actions(kind,id) {return '<div class="row-actions"><button type="button" class="icon-button" data-action="edit-'+kind+'" data-id="'+esc(id)+'" aria-label="Редактировать">'+icon('edit')+'</button><button type="button" class="icon-button delete" data-action="delete" data-id="'+esc(id)+'" aria-label="Удалить">'+icon('delete')+'</button></div>';}
   function taskRows(tasks, waiting=false) {
-    return tasks.map(t=>'<article class="task-row'+(t.done?' done':'')+'"><input type="checkbox" data-task-check="'+esc(t.id)+'" aria-label="Выполнено: '+esc(t.title)+'" '+(t.done?'checked':'')+'><div class="task-time">'+(waiting?'Не влезло':time(t.start))+'<small>'+(waiting?esc(t.time||'без времени'):time(t.end))+'</small></div><div class="task-copy"><h3>'+esc(t.title)+'</h3><p>'+duration(t.duration)+(t.goalId?' · '+esc(getRecord(t.goalId)?.title||'Цель месяца'):'')+'</p><div class="task-tags">'+priorityTag(t)+(t.routineId?'<span class="tag repeat-tag">↻ Повтор</span>':'')+(t.time?'<span class="tag">Фиксированное время</span>':'')+(t.estimated?'<span class="tag '+(t.estimateSource==='qwen'?'ai':'')+'">'+(t.estimateSource==='qwen'?'Оценка Qwen':'Примерное время')+'</span>':'')+(waiting?'<span class="tag warn">Измени время или дату</span>':'')+'</div></div>'+actions('task',t.id)+'</article>').join('');
+    return tasks.map(t=>'<article class="task-row'+(t.done?' done':'')+(t.done&&completionFlash?.id===t.id&&Date.now()-completionFlash.at<500?' just-completed':'')+'"><input type="checkbox" data-task-check="'+esc(t.id)+'" aria-label="Выполнено: '+esc(t.title)+'" '+(t.done?'checked':'')+'><div class="task-time">'+(waiting?'Не влезло':time(t.start))+'<small>'+(waiting?esc(t.time||'без времени'):time(t.end))+'</small></div><div class="task-copy"><h3>'+esc(t.title)+'</h3><p>'+duration(t.duration)+(t.goalId?' · '+esc(getRecord(t.goalId)?.title||'Цель месяца'):'')+'</p><div class="task-tags">'+priorityTag(t)+reminderTag(t)+(t.routineId?'<span class="tag repeat-tag">↻ Повтор</span>':'')+(t.time?'<span class="tag">Фиксированное время</span>':'')+(t.estimated?'<span class="tag '+(t.estimateSource==='qwen'?'ai':'')+'">'+(t.estimateSource==='qwen'?'Оценка Qwen':'Примерное время')+'</span>':'')+(waiting?'<span class="tag warn">Измени время или дату</span>':'')+'</div></div>'+actions('task',t.id)+'</article>').join('');
   }
   function dayPanel(compact=false) {
     const p=plan(), set=settings();
@@ -122,9 +134,14 @@
   }
   function settingsView() {
     const s=settings(), status=ai.getStatus();
-    return head('Под твой ритм.','Настройки помощника и связь между устройствами.')+'<div class="stack"><section class="panel"><div class="settings-section"><h3>Телефон и компьютер — один помощник</h3><p>'+esc(syncText())+'</p>'+button(state.user?'Выйти из аккаунта':'Войти через Google','account','secondary')+'<p>'+esc(state.user?.email||'На обоих устройствах нужен один Google-аккаунт.')+'</p>'+(state.error?'<div class="notice warning">'+esc(state.error)+'</div>':'')+'</div><div class="settings-section"><div class="toggle-line"><div><h3>Локальная нейросеть Qwen</h3><p>Оценивает время дел и предлагает шаги к целям. Первый запрос скачает модель размером примерно 0,6–1 ГБ. Она работает в браузере без API-ключа; на телефоне может быть медленной.</p></div><label class="switch"><input type="checkbox" id="aiEnabled" aria-label="Включить локальную нейросеть" '+(ai.isEnabled()?'checked':'')+'><span></span></label></div><p>Если нейросеть выключена или не запустилась, используется простая приблизительная оценка. Время всегда можно поправить.</p><p id="aiStatus" class="status-note">'+esc(typeof status==='string'?status:status?.message||'')+'</p></div><div class="settings-section"><h3>Время для дел · '+esc(monthLabel())+'</h3><p>Все дни выбранного месяца используют эти границы. Встроенных занятий нет; между делами оставляется указанный перерыв.</p><form id="rhythmForm" class="inline-form"><label class="field">Начало дня<input name="start" type="time" value="'+esc(s.start)+'" required></label><label class="field">Конец дня<input name="end" type="time" value="'+esc(s.end)+'" required></label><label class="field">Перерыв, мин<input name="breakMinutes" type="number" min="0" max="60" step="1" value="'+s.breakMinutes+'" required></label><button class="button" type="submit">Сохранить</button></form></div><div class="settings-section"><h3>Копия данных за месяц</h3><p>Скачать цели, дела, бюджет и расходы за '+esc(monthLabel())+' в JSON. Копия содержит личные данные.</p>'+button(icon('download')+' Скачать копию','export','secondary')+'</div></section><section class="panel" id="installationPanel"></section></div>';
+    return head('Под твой ритм.','Настройки помощника и связь между устройствами.')+'<div class="stack"><section class="panel"><div class="settings-section"><h3>Телефон и компьютер — один помощник</h3><p>'+esc(syncText())+'</p>'+button(state.user?'Выйти из аккаунта':'Войти через Google','account','secondary')+'<p>'+esc(state.user?.email||'На обоих устройствах нужен один Google-аккаунт.')+'</p>'+(state.error?'<div class="notice warning">'+esc(state.error)+'</div>':'')+'</div><div class="settings-section"><div class="toggle-line"><div><h3>Локальная нейросеть Qwen</h3><p>Оценивает время дел и предлагает шаги к целям. Первый запрос скачает модель размером примерно 0,6–1 ГБ. Она работает в браузере без API-ключа; на телефоне может быть медленной.</p></div><label class="switch"><input type="checkbox" id="aiEnabled" aria-label="Включить локальную нейросеть" '+(ai.isEnabled()?'checked':'')+'><span></span></label></div><p>Если нейросеть выключена или не запустилась, используется простая приблизительная оценка. Время всегда можно поправить.</p><p id="aiStatus" class="status-note">'+esc(typeof status==='string'?status:status?.message||'')+'</p></div><div class="settings-section"><h3>Время для дел · '+esc(monthLabel())+'</h3><p>Все дни выбранного месяца используют эти границы. Встроенных занятий нет; между делами оставляется указанный перерыв.</p><form id="rhythmForm" class="inline-form"><label class="field">Начало дня<input name="start" type="time" value="'+esc(s.start)+'" required></label><label class="field">Конец дня<input name="end" type="time" value="'+esc(s.end)+'" required></label><label class="field">Перерыв, мин<input name="breakMinutes" type="number" min="0" max="60" step="1" value="'+s.breakMinutes+'" required></label><button class="button" type="submit">Сохранить</button></form></div><div class="settings-section"><h3>Копия данных за месяц</h3><p>Скачать цели, дела, бюджет и расходы за '+esc(monthLabel())+' в JSON. Копия содержит личные данные.</p>'+button(icon('download')+' Скачать копию','export','secondary')+'</div></section><section class="panel" id="remindersPanel"></section><section class="panel" id="installationPanel"></section></div>';
   }
   function syncText() {return state.error||({local:'Данные сохранены в этом браузере. Войди в Google для синхронизации.',loading:'Подключаю данные аккаунта…',syncing:'Изменения сохранены на устройстве. Отправляю их в облако…',synced:'Синхронизация включена. Изменения обновляются на всех устройствах.',offline:'Нет связи с облаком. Изменения на устройстве ожидают отправки.',error:'Не удалось синхронизировать данные.'}[state.status]||'Сохраняю данные…');}
+  function remindersContent() {
+    const s=reminders?.getStatus()||{},disabled=s.busy||!s.configured||!s.supported||!state.user;
+    const controls=s.enabled?'<div class="reminder-controls">'+button('Прислать проверку','test-reminders','secondary')+button('Отключить здесь','disable-reminders','secondary')+'</div>':s.needsInstall?button('Как добавить на экран Домой','install-app','secondary'):'<button type="button" class="button" data-action="enable-reminders" '+(disabled?'disabled':'')+'>'+(s.busy?'Подключаю…':'Включить напоминания')+'</button>';
+    return '<div class="reminder-heading"><span class="reminder-symbol">'+icon('bell')+'</span><div><h3>Напоминания на этом устройстве</h3><p class="status-note">HVF напомнит о деле с указанным временем, в том числе когда приложение закрыто.</p></div></div><p class="reminder-status '+(s.enabled?'enabled':'')+'" role="status">'+esc(s.message||(s.busy?'Подключаю напоминания…':!s.configured?'Сервис напоминаний ещё не подключён.':'Напоминания пока выключены на этом устройстве.'))+'</p>'+(s.error?'<p class="error">'+esc(s.error)+'</p>':'')+(!state.user?'<p class="status-note">Сначала войди в Google. Настройки дел будут общими на телефоне и компьютере.</p>'+button('Войти через Google','account','secondary'):controls)+'<ol class="reminder-steps"><li>Включи уведомления на этом устройстве.</li><li>В редакторе дела укажи начало и выбери «Напоминание».</li><li>Нажми «Прислать проверку», чтобы проверить доставку.</li></ol><p class="status-note">На iPhone нужен iOS 16.4 или новее: открой HVF с иконки на главном экране и разреши уведомления. Доставка зависит от сети и настроек фокусирования телефона.</p><p class="status-note">Время напоминаний — по Минску. Сервис обрабатывает название и время дела. Изменения расписания отправляются после синхронизации.</p>';
+  }
   function installationContent() {
     const pwa=window.HVFPWA,status=pwa?.getStatus()||{};
     return '<h3>'+(status.installed?'HVF установлен на этом устройстве':'Приложение на телефоне и компьютере')+'</h3><p class="status-note">Постоянная ссылка: <a class="text-link" href="https://haveffee.github.io/daily-schedule/" target="_blank" rel="noopener noreferrer">haveffee.github.io/daily-schedule ↗</a><br>Приложение размещается на GitHub Pages. Компьютер можно выключать: телефон обращается к внешнему хостингу, а синхронизация работает через Firebase.</p><p class="status-note">На iPhone: открой ссылку в Safari → «Поделиться» → «На экран Домой». На компьютере: открой ссылку в Chrome или Edge → меню браузера → «Установить приложение».</p>'+(status.installed?'':button(status.canInstall?'Установить HVF':'Как установить','install-app','secondary'))+(status.offlineReady?'<p class="status-note">Файлы приложения сохранены на этом устройстве. Для входа и обмена данными между устройствами нужен интернет.</p>':'')+(status.updateReady?'<div class="notice">Доступно обновление. Оно применится после закрытия всех окон HVF и следующего открытия.</div>':'')+(status.error?'<p class="status-note">'+esc(status.error)+'</p>':'');
@@ -135,11 +152,12 @@
     $('saveDialog').textContent='Понятно';$('cancelDialog').hidden=true;
   }
   function render() {
-    view=['overview','day','week','goals','money','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'overview';
+    const route=planner.validDate(reminderRouteDate())?'day':location.hash.slice(1);
+    view=['overview','day','week','goals','money','settings'].includes(route)?route:'overview';
     document.querySelectorAll('[data-view]').forEach(el=>{const active=el.dataset.view===(view==='week'?'overview':view);el.classList.toggle('active',active);el.setAttribute('aria-current',active?'page':'false');});
     $('monthPicker').value=month;
     $('content').innerHTML=view==='overview'?overview()+weekTeaser():view==='day'?head('День в твоём ритме.',fmtDate(day,{weekday:'long',day:'numeric',month:'long'})+' · меняй дела, остальное пересчитается.',button(icon('plus')+' Добавить дело','add-task'))+'<div class="stack">'+dayPanel()+routinePanel()+'</div>':view==='week'?weeklyView():view==='goals'?goalsView():view==='money'?moneyView():settingsView();
-    if(view==='settings')$('installationPanel').innerHTML=installationContent();
+    if(view==='settings'){$('installationPanel').innerHTML=installationContent();$('remindersPanel').innerHTML=remindersContent();}
     if(lastRenderedView!==view){lastRenderedView=view;$('content').classList.remove('view-enter');void $('content').offsetWidth;$('content').classList.add('view-enter');}
     $('syncShort').textContent={local:'На этом устройстве',synced:'Всё синхронизировано',offline:'Сохранено на устройстве',loading:'Подключение…',syncing:'Синхронизирую…',error:'Проверь синхронизацию'}[state.status]||'Сохраняю…';
     $('syncDetail').textContent=syncText();$('syncDot').className=state.status==='synced'?'online':state.status==='error'||state.status==='offline'?'warning':'';
@@ -159,7 +177,7 @@
   }
   function taskEditor(task,goalId) {
     const t=task||{}, goals=records('goal');
-    openEditor(task?'Изменить дело':'Новое дело',(t.routineId?'<div class="notice">Изменится только это повторение. Всю серию можно настроить в разделе «Повторяющиеся дела».</div>':'')+field('Что нужно сделать','title','text',t.title||'','required maxlength="100" placeholder="Например, подготовить презентацию"')+'<div class="field-row">'+field('Дата','date','date',t.date||day,'required')+field('Начало, если важно','time','time',t.time||'')+'</div>'+field('Длительность, мин','duration','number',t.estimated?'':t.duration||'','min="5" max="480" step="1" placeholder="Определить автоматически"','Можно оставить пустым. '+(ai.isEnabled()?'Время оценит Qwen.':'Помощник предложит приблизительную оценку.'))+priorityField(t)+selectField('Связать с целью','goalId',[['','Без цели'],...goals.map(g=>[g.id,g.title])],t.goalId||goalId||''),async data=>{
+    openEditor(task?'Изменить дело':'Новое дело',(t.routineId?'<div class="notice">Изменится только это повторение. Всю серию можно настроить в разделе «Повторяющиеся дела».</div>':'')+field('Что нужно сделать','title','text',t.title||'','required maxlength="100" placeholder="Например, подготовить презентацию"')+'<div class="field-row">'+field('Дата','date','date',t.date||day,'required')+field('Начало, если важно','time','time',t.time||'')+'</div>'+field('Длительность, мин','duration','number',t.estimated?'':t.duration||'','min="5" max="480" step="1" placeholder="Определить автоматически"','Можно оставить пустым. '+(ai.isEnabled()?'Время оценит Qwen.':'Помощник предложит приблизительную оценку.'))+priorityField(t)+reminderField(t)+selectField('Связать с целью','goalId',[['','Без цели'],...goals.map(g=>[g.id,g.title])],t.goalId||goalId||''),async data=>{
       const chosenDate=String(data.get('date')), targetMonth=chosenDate.slice(0,7);
       if(!planner.validDate(chosenDate))throw new Error('Выбери дату.');
       const title=String(data.get('title')).trim();if(!title)throw new Error('Напиши название дела.');
@@ -168,6 +186,7 @@
       const minutes=estimate?estimate.minutes:Number(data.get('duration'));if(!Number.isInteger(minutes)||minutes<5||minutes>480)throw new Error('Длительность — от 5 до 480 целых минут.');
       const record={...cleanTask(t),id:t.id&&t.month===targetMonth?t.id:uid(),kind:'task',month:targetMonth,date:chosenDate,title,duration:minutes,time:String(data.get('time')||''),priority:planner.priorityValue(data.get('priority')??t),done:!!t.done,goalId:linked&&getRecord(linked)?.month===targetMonth?linked:'',estimated:!!estimate,estimateSource:estimate?.source||'manual',createdAt:t.createdAt||Date.now()};
       if(t.date&&t.date!==chosenDate){record.moveCount=(Number(t.moveCount)||0)+1;record.movedFromDate=t.date;record.lastMovedDate=nowDate();record.lastMovedAt=new Date().toISOString();}
+      record.reminderMinutes=readReminder(data,record.time,t.reminderMinutes);
       store.put(record);if(t.id&&t.id!==record.id&&getRecord(t.id))store.remove(t.id);
       if(estimate&&ai.isEnabled()){
         const scope=state.user?.uid||'anonymous';
@@ -189,9 +208,10 @@
   }
   function routineEditor(rule) {
     const r=rule||{}, selected=r.weekdays||[1,2,3,4,5];
-    openEditor(rule?'Настроить повторение':'Повторяющееся дело',field('Что повторять','title','text',r.title||'','required maxlength="100"')+'<fieldset class="weekday-field"><legend>Дни недели</legend><div class="weekday-picker">'+weekdays.map((label,i)=>'<label><input type="checkbox" name="weekday'+(i+1)+'" value="'+(i+1)+'" '+(selected.includes(i+1)?'checked':'')+'><span>'+label+'</span></label>').join('')+'</div></fieldset><div class="field-row">'+field('Начать с','startDate','date',r.startDate||day,'required')+field('Повторять до','untilDate','date',r.untilDate||'','','Необязательно, включительно.')+'</div><div class="field-row">'+field('Начало, если важно','time','time',r.time||'')+field('Длительность, мин','duration','number',r.duration||'','min="5" max="480" step="1" placeholder="Оценить"')+'</div>'+priorityField(r)+'<p class="status-note">Изменения применятся к повторениям без отдельных правок. Выполненные, перенесённые и пропущенные дела сохранятся. Сохранение включает серию снова.</p>',async data=>{
+    openEditor(rule?'Настроить повторение':'Повторяющееся дело',field('Что повторять','title','text',r.title||'','required maxlength="100"')+'<fieldset class="weekday-field"><legend>Дни недели</legend><div class="weekday-picker">'+weekdays.map((label,i)=>'<label><input type="checkbox" name="weekday'+(i+1)+'" value="'+(i+1)+'" '+(selected.includes(i+1)?'checked':'')+'><span>'+label+'</span></label>').join('')+'</div></fieldset><div class="field-row">'+field('Начать с','startDate','date',r.startDate||day,'required')+field('Повторять до','untilDate','date',r.untilDate||'','','Необязательно, включительно.')+'</div><div class="field-row">'+field('Начало, если важно','time','time',r.time||'')+field('Длительность, мин','duration','number',r.duration||'','min="5" max="480" step="1" placeholder="Оценить"')+'</div>'+priorityField(r)+reminderField(r)+'<p class="status-note">Изменения применятся к повторениям без отдельных правок. Выполненные, перенесённые и пропущенные дела сохранятся. Сохранение включает серию снова.</p>',async data=>{
       const title=String(data.get('title')||'').trim(),estimated=!data.get('duration');
       const record={...r,id:r.id||uid(),kind:'routine',month:'2000-02',title,weekdays:weekdays.map((_,i)=>i+1).filter(n=>data.get('weekday'+n)),startDate:String(data.get('startDate')||''),untilDate:String(data.get('untilDate')||''),time:String(data.get('time')||''),duration:estimated?core.estimateDuration(title):Number(data.get('duration')),priority:planner.priorityValue(data.get('priority')),active:true,estimated,estimateSource:estimated?'local':'manual',createdAt:r.createdAt||Date.now()};
+      record.reminderMinutes=readReminder(data,record.time,r.reminderMinutes);
       const check=planner.validateRoutine(record);if(!check.valid)throw new Error(check.errors.join('\n'));
       store.put(record);toast('Повторение сохранено. Оно появится в выбранные дни.');
     });
@@ -356,6 +376,10 @@
     else if(action==='important-only'){importantOnly=!importantOnly;render();}
     else if(action==='add-routine')routineEditor();else if(action==='edit-routine')routineEditor(getRecord(id));else if(action==='stop-routine')stopRoutine(id);
     else if(action==='move-preview')openMovePreview();
+    else if(action==='enable-reminders'||action==='disable-reminders'||action==='test-reminders'){
+      const operation=action==='enable-reminders'?'enable':action==='disable-reminders'?'disable':'test';
+      if(reminders)void reminders[operation]().then(result=>{if(result===true)toast(operation==='test'?'Проверка отправлена. Проверь уведомления устройства.':operation==='disable'?'Напоминания на этом устройстве отключены.':'Напоминания подключены. Выбери их в нужных делах.');}).catch(e=>toast(e.message||'Не удалось настроить напоминания.'));
+    }
     else if(action==='report-day'){importantOnly=false;changeDay(id);location.hash='day';}
     else if(action==='prev-week')shiftDay(-7);else if(action==='next-week')shiftDay(7);
     else if(action==='add-goal')goalEditor();else if(action==='edit-goal')goalEditor(getRecord(id));else if(action==='plan-goal')void generateGoal(id);
@@ -379,7 +403,7 @@
   });
   document.addEventListener('change',event=>{
     const el=event.target;
-    if(el.dataset.taskCheck){const task=getTask(el.dataset.taskCheck);if(task)store.put({...cleanTask(task),done:el.checked,completedDate:el.checked?nowDate():'',completedAt:el.checked?new Date().toISOString():'',createdAt:task.createdAt||Date.now()});}
+    if(el.dataset.taskCheck){const task=getTask(el.dataset.taskCheck);if(task){completionFlash=el.checked?{id:task.id,at:Date.now()}:null;store.put({...cleanTask(task),done:el.checked,completedDate:el.checked?nowDate():'',completedAt:el.checked?new Date().toISOString():'',createdAt:task.createdAt||Date.now()});}}
     else if(el.dataset.moveTask&&movePreview){if(el.checked)movePreview.selected.add(el.dataset.moveTask);else movePreview.selected.delete(el.dataset.moveTask);showMovePreview(movePreview);$('formError').textContent='';}
     else if(el.id==='dayPicker')changeDay(el.value);
     else if(el.id==='aiEnabled'){ai.setEnabled(el.checked);toast(el.checked?'Нейросеть включена. Модель загрузится при первом запросе.':'Включена простая приблизительная оценка.');}
@@ -393,7 +417,7 @@
     event.preventDefault();if(busy||!submitEditor)return;
     const save=submitEditor, data=new FormData(event.target),scope=state.user?.uid||'anonymous',formMonth=month;
     busy=true;$('saveDialog').disabled=true;$('saveDialog').textContent='Сохраняю…';$('formError').textContent='';
-    try{await saveGuarded(save,data,scope,formMonth);$('editor').close();movePreview=null;}catch(error){$('formError').textContent=error.message||'Не удалось сохранить.';}finally{busy=false;$('saveDialog').disabled=false;$('saveDialog').textContent=movePreview?'Перенести выбранное':'Сохранить';render();}
+    try{await saveGuarded(save,data,scope,formMonth);$('editor').close();movePreview=null;}catch(error){$('formError').textContent=error.message||'Не удалось сохранить.';}finally{busy=false;$('saveDialog').disabled=false;$('saveDialog').textContent=movePreview?'Перенести выбранное':'Сохранить';if(!$('editor').open&&pendingReminderDate)openReminderDay(pendingReminderDate);render();}
   });
   async function saveGuarded(save,data,scope,formMonth){
     // Account/period navigation is locked while a form has an asynchronous estimate.
@@ -402,15 +426,24 @@
   }
   $('monthPicker').addEventListener('change',event=>{const value=event.target.value;if(!/^\d{4}-\d{2}$/.test(value)||busy)return;month=value;day=month===nowDate().slice(0,7)?nowDate():month+'-01';store.setPeriod(month,day);render();});
   $('accountButton').addEventListener('click',()=>{if(!busy)void store.signInOut().catch(e=>toast(e.message));});
-  function closeEditor(){if(busy){toast('Дождись сохранения.');return;}$('editor').close();movePreview=null;}
+  function closeEditor(){if(busy){toast('Дождись сохранения.');return;}$('editor').close();movePreview=null;if(pendingReminderDate)openReminderDay(pendingReminderDate);}
   $('closeDialog').addEventListener('click',closeEditor);$('cancelDialog').addEventListener('click',closeEditor);
   $('editor').addEventListener('cancel',e=>{if(busy)e.preventDefault();else movePreview=null;});
+  $('editor').addEventListener('close',()=>{if(pendingReminderDate&&!busy)openReminderDay(pendingReminderDate);});
   $('editor').addEventListener('click',event=>{if(event.target===$('editor')){const r=$('editor').getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)closeEditor();}});
   $('closeToast').addEventListener('click',()=>$('toast').hidden=true);$('undoButton').addEventListener('click',()=>{const fn=undoAction;undoAction=null;$('toast').hidden=true;if(fn)fn();});
-  window.addEventListener('hashchange',()=>{render();window.scrollTo(0,0);});
+  function openReminderDay(date) {
+    if(!planner.validDate(date))return;
+    if(busy||$('editor').open){pendingReminderDate=date;toast('Есть напоминание на '+fmtDate(date)+'. Открою день после закрытия формы.');return;}
+    pendingReminderDate='';importantOnly=false;changeDay(date);location.hash='day';render();window.scrollTo(0,0);
+  }
+  window.addEventListener('hashchange',()=>{if(planner.validDate(reminderRouteDate()))openReminderDay(reminderRouteDate());else render();window.scrollTo(0,0);});
+  window.addEventListener('hvf-open-reminder',event=>openReminderDay(event.detail?.date));
   window.addEventListener('hvf-pwa-status',()=>{if(view==='settings')$('installationPanel').innerHTML=installationContent();});
   let lastScope=state.user?.uid||'anonymous';
-  store.subscribe(next=>{const nextScope=next.user?.uid||'anonymous';if(lastScope!==nextScope&&$('editor').open){$('editor').close();submitEditor=null;movePreview=null;toast('Аккаунт изменился. Открой форму заново.');}lastScope=nextScope;state=next;render();});
+  store.subscribe(next=>{const nextScope=next.user?.uid||'anonymous';if(lastScope!==nextScope){pendingReminderDate='';completionFlash=null;if($('editor').open){$('editor').close();submitEditor=null;movePreview=null;toast('Аккаунт изменился. Открой форму заново.');}}lastScope=nextScope;state=next;render();});
   ai.subscribe(status=>{const el=$('aiStatus');if(el)el.textContent=typeof status==='string'?status:status?.message||'';});
+  reminders?.subscribe(()=>{if(view==='settings')$('remindersPanel').innerHTML=remindersContent();});
+  if(reminders)void reminders.init().catch(e=>toast(e.message||'Сервис напоминаний временно недоступен.'));
   store.setPeriod(month,day);render();void store.init();
 }());

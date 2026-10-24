@@ -78,7 +78,7 @@ function createUI(initial = [], options = {}) {
   };
   const window = {
     HVFCore: core, HVFExtras: extras, HVFPlanner: planner, HVFWeekly: weekly, HVFStore: store,
-    HVFPWA: options.pwa,
+    HVFPWA: options.pwa, HVFReminders: options.reminders,
     HVFAI: {
       isEnabled: () => false, getStatus: () => 'Локальная оценка',
       subscribe() {}, setEnabled() {},
@@ -133,7 +133,7 @@ function createUI(initial = [], options = {}) {
       return error;
     },
     navigate(hash) { location.hash = hash; windowEvents.get('hashchange')(); },
-    windowEvent(type) { windowEvents.get(type)?.(); },
+    windowEvent(type, event = {}) { windowEvents.get(type)?.(event); },
     setMonth: value => node('monthPicker').fire('change', { target: { value } })
   };
 }
@@ -146,6 +146,54 @@ function statValue(ui, name) {
   assert.ok(value, 'statistic has a value: ' + name);
   return value[1];
 }
+
+test('task reminders require an explicit start time, persist their lead, and can be turned off', async () => {
+  const ui = createUI();
+  ui.click('add-task');
+  assert.match(ui.fields(), /name="reminderMinutes"/);
+  await ui.submit(taskFields({ title: 'Позвонить', reminderMinutes: '15' }), /укажи время начала/);
+  assert.equal(ui.records('task').length, 0);
+  await ui.submit(taskFields({ title: 'Позвонить', time: '18:00', reminderMinutes: '15' }));
+  const task = ui.records('task')[0];
+  assert.equal(task.reminderMinutes, 15);
+  ui.navigate('#day');
+  assert.match(taskMarkup(ui, task.id), /За 15 мин/);
+  ui.click('edit-task', task.id);
+  await ui.submit(taskFields({ title: 'Позвонить', time: '18:00', reminderMinutes: '-1' }));
+  assert.equal(ui.records('task')[0].reminderMinutes, null);
+  assert.doesNotMatch(taskMarkup(ui, task.id), /reminder-tag/);
+});
+
+test('notification navigation preserves an open editor and opens its target day after saving', async () => {
+  const ui = createUI([dayTask('future', { month: '2026-11', date: '2026-11-01' })]);
+  ui.click('add-task');
+  ui.windowEvent('hvf-open-reminder', { detail: { date: '2026-11-01' } });
+  assert.equal(ui.node('editor').open, true);
+  assert.match(ui.node('toastText').textContent, /после закрытия формы/);
+  await ui.submit(taskFields({ title: 'Не потерять запись' }));
+  assert.ok(ui.records('task').some(t => t.title === 'Не потерять запись' && t.date === DAY));
+  assert.deepEqual(ui.periods.at(-1), { month: '2026-11', day: '2026-11-01' });
+  assert.match(ui.html(), /День в твоём ритме/);
+  assert.ok(taskMarkup(ui, 'future'));
+});
+
+test('reminder setup and a test notification run only through their explicit controls', async () => {
+  const calls = [];
+  const ui = createUI([], { reminders: {
+    init: async () => { calls.push('init'); }, subscribe() {},
+    getStatus: () => ({ supported: true, configured: true, enabled: true, message: 'Напоминания включены' }),
+    enable: async () => { calls.push('enable'); return true; },
+    disable: async () => { calls.push('disable'); return true; },
+    test: async () => { calls.push('test'); return true; }
+  } });
+  ui.account('alice'); ui.navigate('#settings');
+  assert.deepEqual(calls, ['init']);
+  assert.match(ui.node('remindersPanel').innerHTML, /Напоминания включены/);
+  ui.click('test-reminders'); await Promise.resolve();
+  assert.deepEqual(calls, ['init', 'test']);
+  ui.click('disable-reminders'); await Promise.resolve();
+  assert.deepEqual(calls, ['init', 'test', 'disable']);
+});
 
 async function salary(ui, amount, reservePercent = '20', goalsPercent = '20') {
   ui.click('edit-budget');

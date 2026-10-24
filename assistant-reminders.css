@@ -1,0 +1,15 @@
+.reminder-heading{display:flex;gap:14px;align-items:flex-start}
+.reminder-heading h3{font-size:15px}
+.reminder-heading .status-note{margin-top:8px}
+.reminder-symbol{display:grid;place-items:center;flex:none;width:40px;height:40px;background:var(--soft);color:var(--green);border-radius:13px}
+.reminder-symbol svg{width:21px;height:21px}
+.reminder-status{font-size:11px;color:var(--muted);padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin:18px 0;line-height:1.8}
+.reminder-status.enabled{color:var(--green);background:var(--soft)}
+.reminder-controls{display:flex;gap:9px;flex-wrap:wrap}
+.reminder-controls .button{min-height:44px}
+.reminder-steps{padding-left:20px;color:var(--muted);font-size:11px;line-height:1.8;display:grid;gap:7px;margin:20px 0}
+.reminder-tag{color:#6e6489;background:#f2eff8;gap:5px}
+.reminder-tag svg{width:11px;height:11px;flex:none}
+.reminder-field-hint{margin:-8px 0 17px;font-size:10px}
+#remindersPanel .button:disabled{opacity:.55;cursor:default;transform:none;box-shadow:none}
+@media(max-width:430px){.reminder-controls{display:grid;grid-template-columns:1fr}.reminder-heading{gap:10px}.reminder-heading h3{font-size:14px}}

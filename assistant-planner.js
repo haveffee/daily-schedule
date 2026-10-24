@@ -152,7 +152,8 @@
         time: routine.time || '', priority: priorityValue(routine), done: false,
         routineId: routine.id, occurrenceDate: date, virtual: true,
         createdAt: createdTime(routine.createdAt), estimated: Boolean(routine.estimated),
-        estimateSource: routine.estimateSource || (routine.estimated ? 'local' : 'manual')
+        estimateSource: routine.estimateSource || (routine.estimated ? 'local' : 'manual'),
+        reminderMinutes: routine.reminderMinutes === undefined ? null : routine.reminderMinutes
       });
     });
     return result.sort(function (a, b) {

@@ -267,3 +267,12 @@ test('move previews are no-ops for the same day and reject impossible dates', ()
   assert.equal(result.placed.length, 1);
   assert.throws(() => planner.prepareMove(records, '2026-02-29', '2026-03-01'), /даты/);
 });
+
+test('recurring reminders are inherited, while a saved occurrence can disable only its own reminder', () => {
+  const rule = { id: 'reminder-rule', kind: 'routine', month: '2000-02', title: 'Урок', startDate: '2026-10-23', weekdays: [5], duration: 60, time: '18:00', reminderMinutes: 15 };
+  const first = planner.tasksForDay([rule], '2026-10-23')[0];
+  assert.equal(first.reminderMinutes, 15);
+  const disabled = { ...first, virtual: undefined, reminderMinutes: null };
+  assert.equal(planner.tasksForDay([rule, disabled], '2026-10-23')[0].reminderMinutes, null);
+  assert.equal(planner.tasksForDay([rule, disabled], '2026-10-30')[0].reminderMinutes, 15);
+});

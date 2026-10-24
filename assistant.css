@@ -31,3 +31,14 @@ dialog[open]::backdrop{animation:hvf-backdrop-enter .2s ease both}
 @keyframes hvf-backdrop-enter{from{opacity:0}to{opacity:1}}
 @keyframes hvf-toast-enter{from{opacity:0;transform:translateX(-50%) translateY(6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 @media(prefers-reduced-motion:reduce){.view-enter,dialog[open],dialog[open]::backdrop,.toast:not([hidden]){animation:none!important}*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}.button:active:not(:disabled),.icon-button:active:not(:disabled),.date-arrows button:active:not(:disabled),.button:hover:not(:disabled),.icon-button:hover{transform:none}}
+
+/* Small responses to deliberate actions; routine sync does not animate cards. */
+.field input,.field select,.field textarea,.day-tools input,.month-picker input,.inline-form input{transition:border-color .18s ease,box-shadow .18s ease,background-color .18s ease}
+.field input:focus,.field select:focus,.field textarea:focus,.day-tools input:focus,.month-picker input:focus,.inline-form input:focus{border-color:#98ae7f;box-shadow:0 2px 8px #244c4010}
+dialog[open] #dialogFields>.field,dialog[open] #dialogFields>.field-row,dialog[open] #dialogFields>.weekday-field{animation:hvf-field-enter .18s ease-out both}
+.task-row.just-completed{animation:hvf-task-complete .44s ease-out}
+.task-row.just-completed input:checked{animation:hvf-check-complete .32s ease-out}
+@keyframes hvf-field-enter{from{opacity:.75;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@keyframes hvf-task-complete{0%,100%{background-color:transparent}30%{background-color:#e3edda}}
+@keyframes hvf-check-complete{0%,100%{transform:scale(1)}40%{transform:scale(1.12)}}
+@media(prefers-reduced-motion:reduce){dialog[open] #dialogFields>.field,dialog[open] #dialogFields>.field-row,dialog[open] #dialogFields>.weekday-field,.task-row.just-completed,.task-row.just-completed input:checked{animation:none!important}.task-row.just-completed input:checked{transform:none}}

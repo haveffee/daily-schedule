@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hvf-reminders",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-24",
+  "workers_dev": true,
+  "observability": {
+    "enabled": false
+  },
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "vars": {
+    "VAPID_PUBLIC_KEY": "BI8A5fxPUcxsytEhXD19CQAqrWc5FDvBIL9YEkeySb0Fy4p2PBYFP-mz4LR5OURBxBqIAO_t56eaCGEFRig_-zg",
+    "VAPID_SUBJECT": "https://haveffee.github.io/daily-schedule/"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hvf-reminders",
+      "database_id": "2de2fee4-8540-475f-9429-4d07795c5cc2",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

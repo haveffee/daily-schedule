@@ -137,7 +137,7 @@ function client(backend = new Backend(), storage = new Map()) {
   result.store = window.HVFStore;
   result.emit = (event, value) => (events.get(event) || []).forEach(callback => callback(value));
   result.login = uid => {
-    auth.currentUser = uid ? { uid, email: uid + '@example.test', displayName: uid } : null;
+    auth.currentUser = uid ? { uid, email: uid + '@example.test', displayName: uid, getIdToken: async () => 'test-token-' + uid } : null;
     callbacks.forEach(callback => callback(auth.currentUser));
   };
   result.start = async uid => {
@@ -153,6 +153,27 @@ function client(backend = new Backend(), storage = new Map()) {
   result.records = () => copy(result.store.getState().records);
   return result;
 }
+
+test('reminder authentication exposes only the current signed-in account token', async () => {
+  const device = await client().start();
+  await assert.rejects(device.store.getIdToken(), /войти|войди/i);
+  device.login('alice'); await settle();
+  assert.equal(await device.store.getIdToken(), 'test-token-alice');
+  device.login('bob'); await settle();
+  assert.equal(await device.store.getIdToken(), 'test-token-bob');
+});
+
+test('a token requested before switching accounts is never returned to the new account', async () => {
+  const device = await client().start('alice');
+  let finish;
+  device.auth.currentUser.getIdToken = () => new Promise(resolve => { finish = resolve; });
+  const pending = device.store.getIdToken();
+  await settle();
+  assert.equal(typeof finish, 'function');
+  device.login('bob');
+  finish('stale-alice-token');
+  await assert.rejects(pending, /Аккаунт изменился/);
+});
 
 const task = (id, title = id) => ({ id, kind: 'task', month: '2026-10', date: '2026-10-23', title, duration: 30 });
 const routine = (id = 'weekly-lessons') => ({

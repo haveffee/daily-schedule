@@ -409,6 +409,17 @@
       }
     }
   }
+  async function getIdToken() {
+    await init();
+    const current = auth && auth.currentUser;
+    if (!current || !user || current.uid !== owner || user.uid !== owner) {
+      throw new Error("Для напоминаний войди в Google.");
+    }
+    const scope = owner;
+    const token = await current.getIdToken();
+    if (owner !== scope || auth.currentUser !== current) throw new Error("Аккаунт изменился. Повтори действие.");
+    return token;
+  }
   window.addEventListener("online", () => { lastError = ""; emit(); void flush(); void migrateCloudDay(); });
   window.addEventListener("offline", emit);
   window.addEventListener("storage", (event) => {
@@ -431,7 +442,7 @@
     emit(); void flush();
   });
   window.HVFStore = Object.freeze({
-    init, getState, put, remove, signInOut, setPeriod,
+    init, getState, put, remove, signInOut, setPeriod, getIdToken,
     subscribe(callback) {
       if (typeof callback !== "function") throw new Error("Нужна функция подписки.");
       listeners.add(callback); callback(getState());
