@@ -1,0 +1,26 @@
+/* Device-local focus timer. Its face is intentionally still while counting. */
+.focus-panel{position:relative;overflow:hidden;background:linear-gradient(140deg,var(--paper) 58%,#f0f4e9)}
+.focus-meta{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:10px;color:var(--muted);line-height:1.7}
+.focus-status{display:inline-flex;align-items:center;gap:6px;min-height:27px;padding:4px 9px;border-radius:8px;background:var(--soft);color:var(--green);font-size:9px;font-weight:600;line-height:1.6}
+.focus-status::before{content:'';width:5px;height:5px;border-radius:50%;background:currentColor;flex:none}
+.focus-status.paused{color:#8c733a;background:#fbf4e6}
+.focus-status.finished{color:var(--green);background:#e8f1df}
+.focus-time{display:block;margin:18px 0 12px;color:var(--green);font-size:clamp(48px,8vw,76px);font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-3px;line-height:1.12;text-align:center}
+.focus-time.small{font-size:clamp(40px,6vw,58px)}
+.focus-task-choice{display:grid;gap:8px;margin:15px 0;font-size:11px;font-weight:600;color:var(--ink)}
+.focus-task-choice select,.focus-task-choice input{width:100%;min-width:0;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:11px 12px;background:var(--paper);color:var(--ink);font:inherit}
+.focus-task-title{font-size:14px;font-weight:600;line-height:1.7;text-align:center;overflow-wrap:anywhere}
+.focus-panel .focus-description{color:var(--muted);font-size:10px;line-height:1.8;margin:12px 0;overflow-wrap:anywhere}
+.focus-controls{display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:8px;margin-top:17px}
+.focus-controls .button{min-height:44px}
+.focus-presets{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}
+.focus-presets button{min-width:56px;min-height:44px;border:1px solid var(--line);border-radius:9px;padding:8px 11px;background:var(--paper);color:var(--muted);font-size:10px;font-weight:600;transition:background-color .18s ease,color .18s ease,border-color .18s ease}
+.focus-presets button.selected,.focus-presets button[aria-pressed="true"]{background:var(--soft);border-color:#b9c9a8;color:var(--green)}
+.focus-mini{display:flex;align-items:center;justify-content:space-between;gap:13px;min-height:56px;padding:12px 15px;border:1px solid var(--line);border-radius:12px;background:var(--soft);color:var(--green);text-align:left;font-size:11px;margin-bottom:18px}
+.focus-mini>span:first-child{min-width:0;overflow-wrap:anywhere}
+.focus-mini strong{font-size:17px;letter-spacing:-.4px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.focus-mini small{display:block;font-size:9px;color:var(--muted);line-height:1.7;margin-top:3px}
+.focus-task-button{color:var(--green)}
+@media(hover:hover) and (pointer:fine){.focus-presets button:hover{border-color:#a9bb96;color:var(--green)}.focus-mini:hover{border-color:#a9bb96}}
+@media(max-width:650px){.focus-time{font-size:62px;letter-spacing:-2.5px}.focus-task-choice select,.focus-task-choice input{font-size:16px}.focus-controls{gap:7px}.focus-controls .button{flex:1 1 auto}.focus-task-title{font-size:13px}}
+@media(prefers-reduced-motion:reduce){.focus-presets button,.focus-mini{transition:none!important}}

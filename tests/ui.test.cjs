@@ -7,6 +7,9 @@ const core = require('../assistant-core.js');
 const extras = require('../assistant-extras.js');
 const planner = require('../assistant-planner.js');
 const weekly = require('../assistant-weekly.js');
+const quick = require('../assistant-quick.js');
+const limits = require('../assistant-limits.js');
+const focusModule = require('../assistant-focus.js');
 
 const source = fs.readFileSync(path.join(__dirname, '../assistant-ui.js'), 'utf8');
 const MONTH = '2026-10';
@@ -28,6 +31,12 @@ function createUI(initial = [], options = {}) {
   const subscribers = [];
   const periods = [];
   const writes = [];
+  let timerNow = Date.parse(DAY+'T09:00:00Z');
+  let timerTick = () => {};
+  const timerData = new Map();
+  const focus = focusModule.createTimer({now:()=>timerNow,
+    storage:{getItem:key=>timerData.get(key)||null,setItem:(key,value)=>timerData.set(key,value)},
+    setInterval:fn=>{timerTick=fn;return 1;},clearInterval(){}});
 
   function node(id) {
     if (nodes.has(id)) return nodes.get(id);
@@ -79,12 +88,7 @@ function createUI(initial = [], options = {}) {
   const window = {
     HVFCore: core, HVFExtras: extras, HVFPlanner: planner, HVFWeekly: weekly, HVFStore: store,
     HVFPWA: options.pwa, HVFReminders: options.reminders,
-    HVFAI: {
-      isEnabled: () => false, getStatus: () => 'Локальная оценка',
-      subscribe() {}, setEnabled() {},
-      estimate: async () => ({ minutes: 30, source: 'local' }),
-      plan: async () => ({ steps: [], source: 'local' })
-    },
+    HVFQuick: quick, HVFLimits: limits, HVFFocus: focus,
     addEventListener(type, callback) { windowEvents.set(type, callback); },
     scrollTo() {}
   };
@@ -107,7 +111,9 @@ function createUI(initial = [], options = {}) {
   }, { filename: 'assistant-ui.js' });
 
   return {
-    node, periods, writes,
+    node, periods, writes, focus,
+    elapse(ms) {timerNow+=ms;timerTick();return focus.getState();},
+    form(id,values) {documentEvents.get('submit')({target:{id,values},preventDefault(){}});},
     records: kind => Object.values(clone(current.records)).filter(record => !kind || record.kind === kind),
     html: () => normalize(node('content').innerHTML),
     fields: () => normalize(node('dialogFields').innerHTML),
@@ -247,6 +253,91 @@ test('new users see BYN while existing records without currency remain in RUB', 
   ui.click('currency', 'BYN');
   assert.equal(statValue(ui, 'Всего осталось'), '0 BYN');
   assert.doesNotMatch(ui.html(), /<h3>Старый расход<\/h3>/);
+});
+
+test('Qwen controls and generic goal generation are gone while saved steps survive', () => {
+  const ui=createUI([
+    {id:'goal',kind:'goal',month:MONTH,title:'Поступить',outcome:'Сдать экзамен'},
+    {id:'old-step',kind:'task',month:MONTH,date:DAY,title:'Сохранённый шаг',duration:30,estimated:true,estimateSource:'qwen',goalId:'goal'}
+  ]);
+  ui.navigate('#settings');assert.doesNotMatch(ui.html(),/Qwen|aiEnabled|aiStatus/);
+  ui.navigate('#goals');assert.match(ui.html(),/Добавить шаг/);assert.doesNotMatch(ui.html(),/plan-goal|Разбить на шаги/);
+  ui.navigate('#day');assert.match(ui.html(),/Сохранённый шаг/);assert.match(ui.html(),/Примерное время/);assert.doesNotMatch(ui.html(),/Qwen/);
+  assert.equal(ui.records('task').length,1);assert.equal(ui.writes.length,0);
+});
+
+test('quick input opens a review before any write and saves explicit date/time/duration', async () => {
+  const ui=createUI();ui.navigate('#day');
+  ui.form('quickTaskForm',{quickText:'Завтра в 18:00 репетитор на час'});
+  assert.equal(ui.node('dialogTitle').textContent,'Новое дело');
+  assert.match(ui.fields(),/Проверь перед сохранением/);
+  for(const value of ['репетитор','2026-10-24','18:00','60'])assert.ok(ui.fields().includes('value="'+value+'"'),value);
+  assert.equal(ui.records('task').length,0);
+  await ui.submit(taskFields({title:'репетитор',date:'2026-10-24',time:'18:00',duration:'60'}));
+  const [task]=ui.records('task');assert.equal(task.date,'2026-10-24');assert.equal(task.duration,60);assert.equal(task.estimated,false);assert.equal(task.moveCount,undefined);
+  assert.match(ui.html(),/id="quickText"[^>]*value=""/);
+});
+
+test('quick input retains uncertain fragments and escapes their review text', () => {
+  const ui=createUI();ui.navigate('#day');
+  ui.form('quickTaskForm',{quickText:'Завтра в 25:10 купить <script> на час'});
+  assert.match(ui.fields(),/25:10/);assert.match(ui.fields(),/&lt;script&gt;/);assert.doesNotMatch(ui.fields(),/<script>/);
+  assert.match(ui.fields(),/врем|часов/i);assert.equal(ui.writes.length,0);
+});
+
+test('focus pauses, resumes and finishes without completing the task or clearing an open editor', async () => {
+  const ui=createUI([dayTask('focus-me',{title:'Один раздел'})]);
+  ui.click('focus-task','focus-me');await ui.submit({minutes:'25'});
+  assert.equal(ui.focus.getState().phase,'running');assert.match(ui.html(),/Место для фокуса/);
+  ui.click('add-task');const fields=ui.fields(),content=ui.html();
+  ui.elapse(60000);assert.equal(ui.node('focusTime').textContent,'24:00');
+  assert.equal(ui.html(),content);assert.equal(ui.fields(),fields);assert.equal(ui.node('editor').open,true);
+  await ui.node('cancelDialog').fire('click');
+  ui.click('focus-pause');ui.elapse(60000);assert.equal(ui.focus.getState().remainingMs,24*60000);
+  ui.click('focus-resume');ui.elapse(24*60000);assert.equal(ui.focus.getState().phase,'finished');
+  assert.equal(ui.records('task')[0].done,false);assert.match(ui.html(),/Перерыв 5 мин/);
+  ui.click('focus-break','5');assert.equal(ui.focus.getState().mode,'break');assert.equal(ui.focus.getState().remainingMs,300000);
+  assert.equal(ui.records('task')[0].done,false);
+});
+
+test('account changes isolate focus and close a stale focus editor', async () => {
+  const t=dayTask('focus-me');const ui=createUI([t]);
+  ui.click('focus-task',t.id);await ui.submit({minutes:'15'});ui.elapse(60000);
+  ui.click('focus-task',t.id);assert.equal(ui.node('editor').open,true);
+  ui.account('other',[t]);assert.equal(ui.node('editor').open,false);assert.equal(ui.focus.getState().phase,'idle');
+  ui.account(null,[t]);assert.equal(ui.focus.getState().phase,'running');assert.equal(ui.focus.getState().remainingMs,14*60000);
+  assert.equal(ui.writes.length,0);
+});
+
+test('finishing focus leaves the settings form untouched', async () => {
+  const ui=createUI([dayTask('one-minute')]);ui.click('focus-task','one-minute');await ui.submit({minutes:'1'});
+  ui.navigate('#settings');ui.node('content').innerHTML+='<!-- unsaved form state sentinel -->';
+  const settingsHTML=ui.html();ui.elapse(60000);
+  assert.equal(ui.focus.getState().phase,'finished');assert.equal(ui.html(),settingsHTML);
+  assert.match(ui.node('toastText').textContent,/Время фокуса вышло/);
+});
+
+test('category limit keeps its captured ledger when synced currency preferences change', async () => {
+  const ui=createUI();ui.click('edit-limit','limit-'+MONTH+'-BYN-flexible');
+  ui.upsert({id:'finance-preferences',kind:'finance-preferences',month:'2000-01',currency:'USD'});
+  await ui.submit({amount:'100',warningPercent:'80'});
+  const [limit]=ui.records('spending-limit');assert.equal(limit.currency,'BYN');assert.equal(limit.month,MONTH);assert.equal(limit.id,'limit-'+MONTH+'-BYN-flexible');
+  ui.click('currency','BYN');assert.match(ui.html(),/из 100 BYN/);
+  ui.click('edit-limit',limit.id);await ui.submit({amount:'100',warningPercent:'30'},/от 50 до 100/);
+  assert.equal(ui.records('spending-limit')[0].warningPercent,80);
+});
+
+test('expense saves warn only on fresh limit crossings and limit deletion preserves expenses', async () => {
+  const ui=createUI([{id:'limit-'+MONTH+'-BYN-flexible',kind:'spending-limit',month:MONTH,currency:'BYN',category:'flexible',amount:100,warningPercent:80}]);
+  const add=async amount=>{ui.click('add-expense');await ui.submit({title:'Покупка',amount:String(amount),date:DAY,currency:'BYN',category:'flexible'});};
+  await add(79);assert.doesNotMatch(ui.node('toastText').textContent,/достигнуто|израсходован/);
+  await add(1);assert.match(ui.node('toastText').textContent,/80% лимита/);
+  await add(1);assert.doesNotMatch(ui.node('toastText').textContent,/достигнуто|израсходован/);
+  await add(19);assert.match(ui.node('toastText').textContent,/лимит израсходован/);
+  assert.match(ui.html(),/Лимит израсходован/);
+  ui.click('currency','USD');assert.doesNotMatch(ui.html(),/Лимит израсходован/);
+  ui.click('currency','BYN');ui.click('delete','limit-'+MONTH+'-BYN-flexible');
+  assert.equal(ui.records('spending-limit').length,0);assert.equal(ui.records('expense').length,4);assert.match(ui.node('toastText').textContent,/Расходы сохранены/);
 });
 
 test('salary, gifts, mandatory sums and linked payments update the visible budget once', async () => {

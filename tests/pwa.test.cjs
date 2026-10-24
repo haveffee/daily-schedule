@@ -85,7 +85,7 @@ test('installation precaches a complete public shell under the project path only
   const sw = worker();
   await sw.lifecycle('install');
   const urls = sw.requests.map(request => request.url);
-  assert.equal(urls.length, 21);
+  assert.equal(urls.length, 26);
   for (const request of sw.requests) {
     assert.ok(request.url.startsWith(SCOPE));
     assert.equal(request.cache, 'reload');
@@ -98,6 +98,27 @@ test('installation precaches a complete public shell under the project path only
     assert.ok(urls.includes(new URL(match[1], SCOPE).href), 'offline shell includes ' + match[1]);
   }
   assert.ok(!urls.some(url => /firebasejs|firestore|accounts|huggingface/.test(url)));
+});
+
+test('deployment and validation include the same shell and load the new modules before the UI', async () => {
+  const sw = worker();
+  await sw.lifecycle('install');
+  const expected = sw.requests.map(request => new URL(request.url).pathname.split('/').pop()).concat('service-worker.js').sort();
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/update_schedule.yml'), 'utf8');
+  const copied = workflow.match(/\bcp (index\.html [^\n]+) _site\//)[1].trim().split(/\s+/).sort();
+  assert.deepEqual(copied, expected, 'GitHub Pages artifact includes every public shell file');
+  const validator = fs.readFileSync(path.join(root, 'generate.py'), 'utf8');
+  const required = [...validator.match(/REQUIRED = \(([\s\S]*?)\)/)[1].matchAll(/"([^"]+)"/g)].map(match => match[1]).sort();
+  assert.deepEqual(required, expected, 'local validation covers the deployed files');
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const ui = html.indexOf('./assistant-ui.js?v=7');
+  assert.ok(ui > 0);
+  for (const name of ['quick', 'focus', 'limits']) {
+    const moduleIndex = html.indexOf('./assistant-' + name + '.js');
+    assert.ok(moduleIndex > 0 && moduleIndex < ui, name + ' module loads before UI');
+    assert.match(workflow, new RegExp('for file in [^\\n]*assistant-' + name + '\\.js'));
+  }
+  for (const source of [html, workerSource, workflow, validator]) assert.doesNotMatch(source, /assistant-ai\.js/);
 });
 
 test('a missing shell file rejects installation instead of activating a partial version', async () => {
