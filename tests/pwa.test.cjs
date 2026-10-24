@@ -79,7 +79,7 @@ test('installation precaches a complete public shell under the project path only
   const sw = worker();
   await sw.lifecycle('install');
   const urls = sw.requests.map(request => request.url);
-  assert.equal(urls.length, 15);
+  assert.equal(urls.length, 18);
   for (const request of sw.requests) {
     assert.ok(request.url.startsWith(SCOPE));
     assert.equal(request.cache, 'reload');

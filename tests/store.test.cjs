@@ -155,6 +155,18 @@ function client(backend = new Backend(), storage = new Map()) {
 }
 
 const task = (id, title = id) => ({ id, kind: 'task', month: '2026-10', date: '2026-10-23', title, duration: 30 });
+const routine = (id = 'weekly-lessons') => ({
+  id, kind: 'routine', month: '2000-02', title: 'Tutor', duration: 60, time: '18:00',
+  priority: 2, weekdaysISO: [1, 5], startDate: '2026-10-23', untilDate: '',
+});
+const occurrence = (routineId = 'weekly-lessons', date = '2026-10-23') => ({
+  id: `routine:${routineId}:${date}`, kind: 'task', month: date.slice(0, 7), date,
+  routineId, occurrenceDate: date, title: 'Tutor', duration: 60, time: '18:00', priority: 2, done: false,
+});
+const skip = (routineId = 'weekly-lessons', date = '2026-10-23') => ({
+  id: `skip:${routineId}:${date}`, kind: 'routine-skip', month: date.slice(0, 7),
+  date, routineId, occurrenceDate: date,
+});
 
 test('empty assistant stays empty and anonymous changes survive reload and deletion', async () => {
   const a = await client().start();
@@ -370,4 +382,160 @@ test('finance preferences and monthly records retain scope through offline repla
   assert.equal(phone.records()['finance-preferences'].currency, 'USD');
   assert.equal(phone.records()['budget-2026-11-BYN'].income, 2500);
   assert.equal(backend.documents.get('bob/2000-01').assistantV2['finance-preferences'].value.currency, 'RUB');
+});
+
+test('recurring plans and occurrence exceptions stay available across selected months and devices', async () => {
+  const backend = new Backend();
+  const desktop = await client(backend).start('alice');
+  const phone = await client(backend).start('alice');
+  desktop.store.put(routine());
+  phone.store.put({ ...occurrence(), done: true });
+  phone.store.put(skip('weekly-lessons', '2026-11-02'));
+  await settle();
+
+  desktop.store.setPeriod('2026-11', '2026-11-02');
+  phone.store.setPeriod('2026-12', '2026-12-01');
+  await settle();
+  assert.deepEqual(desktop.records(), phone.records());
+  assert.equal(phone.records()['weekly-lessons'].month, '2000-02');
+  assert.deepEqual(phone.records()['weekly-lessons'].weekdaysISO, [1, 5]);
+  assert.equal(phone.records()['routine:weekly-lessons:2026-10-23'].done, true);
+  assert.equal(phone.records()['skip:weekly-lessons:2026-11-02'].kind, 'routine-skip');
+  assert.equal(backend.documents.get('alice/2000-02').assistantV2['weekly-lessons'].value.priority, 2);
+  assert.equal(backend.documents.get('alice/2026-11').assistantV2['skip:weekly-lessons:2026-11-02'].value.occurrenceDate, '2026-11-02');
+});
+
+test('offline recurring plans, skips and priority edits survive reload without losing other device edits', async () => {
+  const backend = new Backend();
+  const desktop = await client(backend).start('alice');
+  const phone = await client(backend).start('alice');
+  desktop.store.put(routine());
+  desktop.store.put(task('one-off'));
+  await settle();
+  phone.offline();
+  phone.store.put({ ...routine(), priority: 0, weekdaysISO: [2, 4] });
+  phone.store.put(skip());
+  phone.store.put({ ...occurrence('weekly-lessons', '2026-11-03'), priority: 1, done: true });
+  desktop.store.put({ ...desktop.records()['one-off'], title: 'Edited on desktop', priority: 2 });
+  await settle();
+
+  const reloaded = client(backend, phone.storage);
+  reloaded.offline(); await reloaded.start('alice');
+  reloaded.store.setPeriod('2026-11', '2026-11-03');
+  assert.equal(reloaded.records()['weekly-lessons'].priority, 0);
+  assert.equal(reloaded.records()['skip:weekly-lessons:2026-10-23'].kind, 'routine-skip');
+  assert.equal(reloaded.records()['routine:weekly-lessons:2026-11-03'].done, true);
+  reloaded.online(); await settle();
+
+  assert.deepEqual(reloaded.records(), desktop.records());
+  assert.equal(desktop.records()['one-off'].title, 'Edited on desktop');
+  assert.equal(desktop.records()['one-off'].priority, 2);
+  assert.deepEqual(desktop.records()['weekly-lessons'].weekdaysISO, [2, 4]);
+  assert.equal(desktop.records()['routine:weekly-lessons:2026-11-03'].priority, 1);
+});
+
+test('two devices materializing the same recurring occurrence keep one durable record', async () => {
+  const backend = new Backend();
+  const desktop = await client(backend).start('alice');
+  const phone = await client(backend).start('alice');
+  desktop.store.put(routine()); await settle();
+  desktop.offline(); phone.offline();
+  desktop.store.put({ ...occurrence(), done: true });
+  phone.store.put({ ...occurrence(), priority: 0 });
+  desktop.online(); await settle();
+  phone.online(); await settle();
+
+  const id = occurrence().id;
+  assert.deepEqual(desktop.records(), phone.records());
+  assert.deepEqual(Object.values(phone.records()).filter(record => record.kind === 'task').map(record => record.id), [id]);
+  assert.equal(Object.keys(backend.documents.get('alice/2026-10').assistantV2).filter(key => key === id).length, 1);
+  const reloaded = await client(backend).start('alice');
+  assert.deepEqual(reloaded.records(), phone.records());
+});
+
+test('an occurrence skip remains durable when another device uploads an older occurrence edit', async () => {
+  const backend = new Backend();
+  const desktop = await client(backend).start('alice');
+  const phone = await client(backend).start('alice');
+  desktop.store.put(routine());
+  desktop.store.put(occurrence()); await settle();
+  phone.offline();
+  phone.store.put({ ...occurrence(), title: 'Offline title edit', priority: 0 });
+  desktop.store.put(skip());
+  desktop.store.remove(occurrence().id);
+  await settle();
+  phone.online(); await settle();
+
+  assert.deepEqual(phone.records(), desktop.records());
+  assert.equal(phone.records()[occurrence().id], undefined);
+  assert.equal(phone.records()[skip().id].routineId, 'weekly-lessons');
+  const reloaded = await client(backend).start('alice');
+  assert.equal(reloaded.records()[skip().id].kind, 'routine-skip');
+  assert.equal(backend.documents.get('alice/2026-10').assistantV2[occurrence().id].deleted, true);
+});
+
+test('deleted routines cannot be revived by stale offline edits but can be restored deliberately', async () => {
+  const backend = new Backend();
+  const desktop = await client(backend).start('alice');
+  const phone = await client(backend).start('alice');
+  desktop.store.put(routine()); await settle();
+  phone.offline();
+  phone.store.put({ ...routine(), title: 'Stale tutor edit' });
+  desktop.store.remove('weekly-lessons'); await settle();
+  phone.online(); await settle();
+  assert.equal(phone.records()['weekly-lessons'], undefined);
+
+  phone.store.put({ ...routine(), title: 'Restored tutor plan' }); await settle();
+  assert.equal(desktop.records()['weekly-lessons'].title, 'Restored tutor plan');
+  assert.equal(backend.documents.get('alice/2000-02').assistantV2['weekly-lessons'].deleted, false);
+});
+
+test('routine skips may be removed and recreated explicitly while accounts remain isolated', async () => {
+  const backend = new Backend();
+  const desktop = await client(backend).start('alice');
+  desktop.store.put(routine());
+  desktop.store.put(skip()); await settle();
+  desktop.store.remove(skip().id); await settle();
+  const phone = await client(backend).start('alice');
+  assert.equal(phone.records()[skip().id], undefined);
+  phone.store.put(skip()); await settle();
+  assert.equal(desktop.records()[skip().id].kind, 'routine-skip');
+  phone.login('bob'); await settle();
+  assert.deepEqual(phone.records(), {});
+  phone.store.put({ ...routine(), title: 'Bob tutor', priority: 0 }); await settle();
+  phone.login('alice'); await settle();
+  assert.equal(phone.records()['weekly-lessons'].title, 'Tutor');
+  assert.equal(phone.records()[skip().id].kind, 'routine-skip');
+  assert.equal(backend.documents.get('bob/2000-02').assistantV2['weekly-lessons'].value.title, 'Bob tutor');
+});
+
+test('an offline occurrence moved to another month keeps its original identity after synchronization', async () => {
+  const backend = new Backend();
+  const desktop = await client(backend).start('alice');
+  const phone = await client(backend).start('alice');
+  const original = occurrence();
+  desktop.store.put(routine());
+  desktop.store.put(original); await settle();
+  phone.offline();
+  const moved = {
+    ...original, id: 'moved-tutor-occurrence', month: '2026-11', date: '2026-11-01',
+    priority: 0, done: true, lastMovedAt: 1792713600000,
+  };
+  phone.store.put(moved);
+  phone.store.remove(original.id);
+  phone.store.setPeriod('2026-11', '2026-11-01');
+
+  const reloaded = client(backend, phone.storage);
+  reloaded.offline(); await reloaded.start('alice');
+  assert.equal(reloaded.records()[original.id], undefined);
+  assert.equal(reloaded.records()[moved.id].date, '2026-11-01');
+  assert.equal(reloaded.records()[moved.id].occurrenceDate, '2026-10-23');
+  reloaded.online(); await settle();
+
+  assert.deepEqual(desktop.records(), reloaded.records());
+  assert.equal(desktop.records()[moved.id].routineId, original.routineId);
+  assert.equal(desktop.records()[moved.id].priority, 0);
+  assert.equal(desktop.records()[moved.id].done, true);
+  assert.equal(backend.documents.get('alice/2026-10').assistantV2[original.id].deleted, true);
+  assert.equal(backend.documents.get('alice/2026-11').assistantV2[moved.id].value.occurrenceDate, '2026-10-23');
 });

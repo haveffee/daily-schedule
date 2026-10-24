@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const core = window.HVFCore, store = window.HVFStore, ai = window.HVFAI;
+  const core = window.HVFCore, store = window.HVFStore, ai = window.HVFAI, planner = window.HVFPlanner, weekly = window.HVFWeekly;
   const paths = {
     home:'M3 10 12 3l9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z',
     calendar:'M5 5h14a2 2 0 0 1 2 2v13H3V7a2 2 0 0 1 2-2ZM7 3v4m10-4v4M3 10h18m-13 4h2m4 0h2m-8 3h2',
@@ -17,7 +17,7 @@
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const uid = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)+Math.random().toString(36).slice(2);
   const nowDate = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Minsk',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-  let day = nowDate(), month = day.slice(0,7), state = store.getState(), view = 'overview', lastRenderedView = '', submitEditor = null, busy = false, planningGoal = '', toastTimer, undoAction;
+  let day = nowDate(), month = day.slice(0,7), state = store.getState(), view = 'overview', lastRenderedView = '', submitEditor = null, busy = false, planningGoal = '', toastTimer, undoAction, importantOnly = false, movePreview = null;
   const fmtDate = (date, options={day:'numeric',month:'long'}) => new Intl.DateTimeFormat('ru-RU',{...options,timeZone:'Europe/Minsk'}).format(new Date(date+'T12:00:00+03:00'));
   const monthLabel = () => fmtDate(month+'-01',{month:'long',year:'numeric'}).replace(' г.','');
   const currencies = {BYN:'Белорусский рубль',USD:'Доллар США',RUB:'Российский рубль'};
@@ -31,7 +31,18 @@
   const settings = () => records('settings')[0] || {start:'09:00',end:'22:00',breakMinutes:5};
   const currencyRecords = (kind,currency=selectedCurrency()) => records(kind).filter(record=>recordCurrency(record)===currency);
   const budgetConfig = (currency=selectedCurrency()) => currencyRecords('budget',currency).find(r=>r.id==='budget-'+month+'-'+currency)||currencyRecords('budget',currency)[0]||{income:0,reservePercent:20,goalsPercent:20,currency};
-  const dailyTasks = () => records('task').filter(t=>t.date===day);
+  const allRecords = () => Object.values(state.records);
+  const dailyTasks = () => planner.tasksForDay(allRecords(),day);
+  const priorityNames = ['Низкий','Обычный','Высокий'];
+  const priorityTag = (task) => '<span class="tag priority-'+planner.priorityValue(task)+'">'+priorityNames[planner.priorityValue(task)]+' приоритет</span>';
+  const priorityField = (value) => selectField('Приоритет','priority',[['2','Высокий · коралловый'],['1','Обычный · зелёный'],['0','Низкий · серый']],String(planner.priorityValue(value)));
+  function getTask(id) {
+    if(getRecord(id)?.kind==='task')return getRecord(id);
+    const date=String(id).slice(-10);
+    return planner.validDate(date)?planner.tasksForDay(allRecords(),date).find(t=>t.id===id):null;
+  }
+  function cleanTask(task) {const copy={...task};delete copy.virtual;delete copy.start;delete copy.end;return copy;}
+  function rhythmFor(date) {return allRecords().find(r=>r.kind==='settings'&&r.month===date.slice(0,7))||{start:'09:00',end:'22:00',breakMinutes:5};}
   const budget = (currency=selectedCurrency()) => core.allocateBudget({...budgetConfig(currency),currency,incomes:records('income'),commitments:records('commitment'),goals:records('goal'),expenses:records('expense')});
   function setCurrency(currency) {if(Object.hasOwn(currencies,currency))store.put({id:'finance-preferences',kind:'finance-preferences',month:'2000-01',currency});}
   function currencyField(value=selectedCurrency()) {return selectField('Валюта','currency',Object.entries(currencies).map(([c,n])=>[c,c+' · '+n]),value);}
@@ -49,12 +60,14 @@
   }
   function actions(kind,id) {return '<div class="row-actions"><button type="button" class="icon-button" data-action="edit-'+kind+'" data-id="'+esc(id)+'" aria-label="Редактировать">'+icon('edit')+'</button><button type="button" class="icon-button delete" data-action="delete" data-id="'+esc(id)+'" aria-label="Удалить">'+icon('delete')+'</button></div>';}
   function taskRows(tasks, waiting=false) {
-    return tasks.map(t=>'<article class="task-row'+(t.done?' done':'')+'"><input type="checkbox" data-task-check="'+esc(t.id)+'" aria-label="Выполнено: '+esc(t.title)+'" '+(t.done?'checked':'')+'><div class="task-time">'+(waiting?'Не влезло':time(t.start))+'<small>'+(waiting?esc(t.time||'без времени'):time(t.end))+'</small></div><div class="task-copy"><h3>'+esc(t.title)+'</h3><p>'+duration(t.duration)+(t.goalId?' · '+esc(getRecord(t.goalId)?.title||'Цель месяца'):'')+'</p>'+(waiting?'<span class="tag warn">Измени время или дату</span>':t.estimated?'<span class="tag '+(t.estimateSource==='qwen'?'ai':'')+'">'+(t.estimateSource==='qwen'?'Оценка Qwen':'Примерное время')+'</span>':t.time?'<span class="tag">Фиксированное время</span>':'')+'</div>'+actions('task',t.id)+'</article>').join('');
+    return tasks.map(t=>'<article class="task-row'+(t.done?' done':'')+'"><input type="checkbox" data-task-check="'+esc(t.id)+'" aria-label="Выполнено: '+esc(t.title)+'" '+(t.done?'checked':'')+'><div class="task-time">'+(waiting?'Не влезло':time(t.start))+'<small>'+(waiting?esc(t.time||'без времени'):time(t.end))+'</small></div><div class="task-copy"><h3>'+esc(t.title)+'</h3><p>'+duration(t.duration)+(t.goalId?' · '+esc(getRecord(t.goalId)?.title||'Цель месяца'):'')+'</p><div class="task-tags">'+priorityTag(t)+(t.routineId?'<span class="tag repeat-tag">↻ Повтор</span>':'')+(t.time?'<span class="tag">Фиксированное время</span>':'')+(t.estimated?'<span class="tag '+(t.estimateSource==='qwen'?'ai':'')+'">'+(t.estimateSource==='qwen'?'Оценка Qwen':'Примерное время')+'</span>':'')+(waiting?'<span class="tag warn">Измени время или дату</span>':'')+'</div></div>'+actions('task',t.id)+'</article>').join('');
   }
   function dayPanel(compact=false) {
     const p=plan(), set=settings();
     const tools=compact?'':'<div class="day-tools"><div class="date-arrows"><button type="button" data-action="prev-day" aria-label="Предыдущий день">‹</button><button type="button" data-action="next-day" aria-label="Следующий день">›</button></div><label><span class="sr-only">Дата дел</span><input type="date" id="dayPicker" value="'+day+'" required></label><button type="button" class="text-link" data-action="today">Сегодня</button><span class="day-meta">'+esc(set.start)+'–'+esc(set.end)+' · перерыв '+set.breakMinutes+' мин</span></div>';
-    return '<section class="panel">'+panelHead(compact?'Мой день':'Дела на '+fmtDate(day),compact?'day':'',compact?'Открыть день':'')+tools+(p.placed.length?taskRows(compact?p.placed.slice(0,5):p.placed):!p.waiting.length?empty('calendar','В этом дне есть место для тебя','Добавь первое дело. Время можно не указывать — помощник предложит длительность.',button('+ Добавить дело','add-task','small secondary')):'')+(p.waiting.length?'<div class="notice warning">'+p.waiting.length+' дел пока не помещаются'+(p.conflicts.length?' или пересекаются с другими встречами':'')+'. Они сохранены: можно изменить время, длительность или перенести их на другой день.</div>'+taskRows(p.waiting,true):'')+(p.placed.length&&compact&&p.placed.length>5?'<a class="text-link" href="#day">Ещё '+(p.placed.length-5)+' дел →</a>':'')+'</section>';
+    const shown=importantOnly&&!compact?p.placed.filter(t=>planner.priorityValue(t)===2):p.placed, waiting=importantOnly&&!compact?p.waiting.filter(t=>planner.priorityValue(t)===2):p.waiting;
+    const featureTools=compact?'':'<div class="planner-toolbar"><button type="button" class="filter-chip '+(importantOnly?'selected':'')+'" data-action="important-only" aria-pressed="'+importantOnly+'">● Только важное</button>'+button('↻ Повторять дело','add-routine','small secondary')+button('На завтра →','move-preview','small secondary')+'<a class="text-link" href="#week">Итоги недели ↗</a></div><p class="status-note planner-hint">Свободные дела с высоким приоритетом идут раньше. Встречи с указанным временем сохраняют своё место.</p>';
+    return '<section class="panel">'+panelHead(compact?'Мой день':'Дела на '+fmtDate(day),compact?'day':'',compact?'Открыть день':'')+tools+featureTools+(shown.length?taskRows(compact?shown.slice(0,5):shown):!waiting.length?empty('calendar',importantOnly&&!compact?'Важных дел нет':'В этом дне есть место для тебя',importantOnly&&!compact?'Повышай приоритет в редакторе дела или покажи весь день.':'Добавь первое дело. Время можно не указывать — помощник предложит длительность.',button(importantOnly&&!compact?'Показать все дела':'+ Добавить дело',importantOnly&&!compact?'important-only':'add-task','small secondary')):'')+(waiting.length?'<div class="notice warning">'+waiting.length+' дел пока не помещаются'+(p.conflicts.length?' или пересекаются с другими встречами':'')+'. Они сохранены: можно изменить время, длительность или перенести их на другой день.</div>'+taskRows(waiting,true):'')+(shown.length&&compact&&shown.length>5?'<a class="text-link" href="#day">Ещё '+(shown.length-5)+' дел →</a>':'')+'</section>';
   }
   function progress(goal) {
     const tasks=records('task').filter(t=>t.goalId===goal.id), done=tasks.filter(t=>t.done).length;
@@ -122,10 +135,10 @@
     $('saveDialog').textContent='Понятно';$('cancelDialog').hidden=true;
   }
   function render() {
-    view=['overview','day','goals','money','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'overview';
-    document.querySelectorAll('[data-view]').forEach(el=>{el.classList.toggle('active',el.dataset.view===view);el.setAttribute('aria-current',el.dataset.view===view?'page':'false');});
+    view=['overview','day','week','goals','money','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'overview';
+    document.querySelectorAll('[data-view]').forEach(el=>{const active=el.dataset.view===(view==='week'?'overview':view);el.classList.toggle('active',active);el.setAttribute('aria-current',active?'page':'false');});
     $('monthPicker').value=month;
-    $('content').innerHTML=view==='overview'?overview():view==='day'?head('День в твоём ритме.',fmtDate(day,{weekday:'long',day:'numeric',month:'long'})+' · меняй дела, остальное пересчитается.',button(icon('plus')+' Добавить дело','add-task'))+dayPanel():view==='goals'?goalsView():view==='money'?moneyView():settingsView();
+    $('content').innerHTML=view==='overview'?overview()+weekTeaser():view==='day'?head('День в твоём ритме.',fmtDate(day,{weekday:'long',day:'numeric',month:'long'})+' · меняй дела, остальное пересчитается.',button(icon('plus')+' Добавить дело','add-task'))+'<div class="stack">'+dayPanel()+routinePanel()+'</div>':view==='week'?weeklyView():view==='goals'?goalsView():view==='money'?moneyView():settingsView();
     if(view==='settings')$('installationPanel').innerHTML=installationContent();
     if(lastRenderedView!==view){lastRenderedView=view;$('content').classList.remove('view-enter');void $('content').offsetWidth;$('content').classList.add('view-enter');}
     $('syncShort').textContent={local:'На этом устройстве',synced:'Всё синхронизировано',offline:'Сохранено на устройстве',loading:'Подключение…',syncing:'Синхронизирую…',error:'Проверь синхронизацию'}[state.status]||'Сохраняю…';
@@ -140,19 +153,22 @@
   function selectField(label,name,options,value='') {return '<label class="field">'+label+'<select name="'+name+'">'+options.map(([id,title])=>'<option value="'+esc(id)+'" '+(id===value?'selected':'')+'>'+esc(title)+'</option>').join('')+'</select></label>';}
   function openEditor(title,html,save) {
     if(busy)return;
+    movePreview=null;
     $('dialogTitle').textContent=title;$('dialogFields').innerHTML=html;$('formError').textContent='';$('saveDialog').disabled=false;$('saveDialog').textContent='Сохранить';submitEditor=save;$('editor').showModal();
     $('cancelDialog').hidden=false;
   }
   function taskEditor(task,goalId) {
     const t=task||{}, goals=records('goal');
-    openEditor(task?'Изменить дело':'Новое дело',field('Что нужно сделать','title','text',t.title||'','required maxlength="100" placeholder="Например, подготовить презентацию"')+'<div class="field-row">'+field('Дата','date','date',t.date||day,'required')+field('Начало, если важно','time','time',t.time||'')+'</div>'+field('Длительность, мин','duration','number',t.estimated?'':t.duration||'','min="5" max="480" step="1" placeholder="Определить автоматически"','Можно оставить пустым. '+(ai.isEnabled()?'Время оценит Qwen.':'Помощник предложит приблизительную оценку.'))+selectField('Связать с целью','goalId',[['','Без цели'],...goals.map(g=>[g.id,g.title])],t.goalId||goalId||''),async data=>{
+    openEditor(task?'Изменить дело':'Новое дело',(t.routineId?'<div class="notice">Изменится только это повторение. Всю серию можно настроить в разделе «Повторяющиеся дела».</div>':'')+field('Что нужно сделать','title','text',t.title||'','required maxlength="100" placeholder="Например, подготовить презентацию"')+'<div class="field-row">'+field('Дата','date','date',t.date||day,'required')+field('Начало, если важно','time','time',t.time||'')+'</div>'+field('Длительность, мин','duration','number',t.estimated?'':t.duration||'','min="5" max="480" step="1" placeholder="Определить автоматически"','Можно оставить пустым. '+(ai.isEnabled()?'Время оценит Qwen.':'Помощник предложит приблизительную оценку.'))+priorityField(t)+selectField('Связать с целью','goalId',[['','Без цели'],...goals.map(g=>[g.id,g.title])],t.goalId||goalId||''),async data=>{
       const chosenDate=String(data.get('date')), targetMonth=chosenDate.slice(0,7);
-      if(!/^\d{4}-\d{2}-\d{2}$/.test(chosenDate))throw new Error('Выбери дату.');
+      if(!planner.validDate(chosenDate))throw new Error('Выбери дату.');
       const title=String(data.get('title')).trim();if(!title)throw new Error('Напиши название дела.');
       const estimate=!data.get('duration')?{minutes:core.estimateDuration(title),source:'local'}:null;
       const linked=String(data.get('goalId')||'');
-      const record={...t,id:t.id&&t.month===targetMonth?t.id:uid(),kind:'task',month:targetMonth,date:chosenDate,title,duration:estimate?estimate.minutes:Number(data.get('duration')),time:String(data.get('time')||''),done:!!t.done,goalId:linked&&getRecord(linked)?.month===targetMonth?linked:'',estimated:!!estimate,estimateSource:estimate?.source||'manual',createdAt:t.createdAt||Date.now()};
-      store.put(record);if(t.id&&t.id!==record.id)store.remove(t.id);
+      const minutes=estimate?estimate.minutes:Number(data.get('duration'));if(!Number.isInteger(minutes)||minutes<5||minutes>480)throw new Error('Длительность — от 5 до 480 целых минут.');
+      const record={...cleanTask(t),id:t.id&&t.month===targetMonth?t.id:uid(),kind:'task',month:targetMonth,date:chosenDate,title,duration:minutes,time:String(data.get('time')||''),priority:planner.priorityValue(data.get('priority')??t),done:!!t.done,goalId:linked&&getRecord(linked)?.month===targetMonth?linked:'',estimated:!!estimate,estimateSource:estimate?.source||'manual',createdAt:t.createdAt||Date.now()};
+      if(t.date&&t.date!==chosenDate){record.moveCount=(Number(t.moveCount)||0)+1;record.movedFromDate=t.date;record.lastMovedDate=nowDate();record.lastMovedAt=new Date().toISOString();}
+      store.put(record);if(t.id&&t.id!==record.id&&getRecord(t.id))store.remove(t.id);
       if(estimate&&ai.isEnabled()){
         const scope=state.user?.uid||'anonymous';
         void ai.estimate(title).then(result=>{
@@ -165,6 +181,62 @@
       if(targetMonth!==month){day=chosenDate;month=targetMonth;store.setPeriod(month,day);}
       toast('Дело сохранено на '+fmtDate(chosenDate)+'. План пересчитан.');
     });
+  }
+  const weekdays = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+  function routinePanel() {
+    const rules=allRecords().filter(r=>r.kind==='routine').sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+    return '<section class="panel routine-panel">'+panelHead('Повторяющиеся дела')+'<p class="status-note planner-hint">Выбери дни недели один раз. Отметка, перенос или удаление отдельного повторения не меняет остальные.</p>'+(rules.length?rules.map(r=>{const stopped=r.active===false||r.untilDate&&r.untilDate<day;return '<article class="routine-row"><div><h3>'+esc(r.title)+'</h3><p>'+esc((r.weekdays||[]).map(n=>weekdays[n-1]).join(' · '))+' · '+duration(r.duration)+(r.time?' · '+esc(r.time):'')+'</p><small>С '+fmtDate(r.startDate)+(r.untilDate?' по '+fmtDate(r.untilDate):'')+(stopped?' · серия остановлена':'')+'</small><div class="task-tags">'+priorityTag(r)+'</div></div><div class="routine-actions">'+button('Настроить','edit-routine','small secondary',r.id)+(!stopped?button('Остановить','stop-routine','small secondary',r.id):'')+'</div></article>';}).join(''):empty('calendar','Ритм, который подходит тебе','Учёба по вторникам, тренировки через день или еженедельный обзор — задай своё повторение.',''))+button('+ Повторяющееся дело','add-routine','small secondary')+'</section>';
+  }
+  function routineEditor(rule) {
+    const r=rule||{}, selected=r.weekdays||[1,2,3,4,5];
+    openEditor(rule?'Настроить повторение':'Повторяющееся дело',field('Что повторять','title','text',r.title||'','required maxlength="100"')+'<fieldset class="weekday-field"><legend>Дни недели</legend><div class="weekday-picker">'+weekdays.map((label,i)=>'<label><input type="checkbox" name="weekday'+(i+1)+'" value="'+(i+1)+'" '+(selected.includes(i+1)?'checked':'')+'><span>'+label+'</span></label>').join('')+'</div></fieldset><div class="field-row">'+field('Начать с','startDate','date',r.startDate||day,'required')+field('Повторять до','untilDate','date',r.untilDate||'','','Необязательно, включительно.')+'</div><div class="field-row">'+field('Начало, если важно','time','time',r.time||'')+field('Длительность, мин','duration','number',r.duration||'','min="5" max="480" step="1" placeholder="Оценить"')+'</div>'+priorityField(r)+'<p class="status-note">Изменения применятся к повторениям без отдельных правок. Выполненные, перенесённые и пропущенные дела сохранятся. Сохранение включает серию снова.</p>',async data=>{
+      const title=String(data.get('title')||'').trim(),estimated=!data.get('duration');
+      const record={...r,id:r.id||uid(),kind:'routine',month:'2000-02',title,weekdays:weekdays.map((_,i)=>i+1).filter(n=>data.get('weekday'+n)),startDate:String(data.get('startDate')||''),untilDate:String(data.get('untilDate')||''),time:String(data.get('time')||''),duration:estimated?core.estimateDuration(title):Number(data.get('duration')),priority:planner.priorityValue(data.get('priority')),active:true,estimated,estimateSource:estimated?'local':'manual',createdAt:r.createdAt||Date.now()};
+      const check=planner.validateRoutine(record);if(!check.valid)throw new Error(check.errors.join('\n'));
+      store.put(record);toast('Повторение сохранено. Оно появится в выбранные дни.');
+    });
+  }
+  function stopRoutine(id) {
+    const rule=getRecord(id);if(!rule)return;
+    openEditor('Остановить повторение?', '<p class="preview-intro">«'+esc(rule.title)+'» больше не будет автоматически появляться с '+fmtDate(day)+'. Прошлые дни и отдельно изменённые дела сохранятся.</p>',async()=>{
+      const previous=new Date(day+'T12:00:00Z');previous.setUTCDate(previous.getUTCDate()-1);const until=previous.toISOString().slice(0,10);
+      store.put({...rule,...(until>=rule.startDate?{untilDate:rule.untilDate&&rule.untilDate<until?rule.untilDate:until}:{active:false})});
+      const scope=state.user?.uid||'anonymous';toast('Повторение остановлено.',()=>{if((state.user?.uid||'anonymous')===scope)store.put(rule);});
+    });
+    $('saveDialog').textContent='Остановить серию';
+  }
+  function movePlan(context) {return planner.prepareMove(allRecords(),context.from,context.to,{...rhythmFor(context.to),taskIds:[...context.selected]});}
+  function showMovePreview(context) {
+    const candidates=planner.tasksForDay(allRecords(),context.from).filter(t=>!t.done), preview=movePlan(context), ids=new Set(preview.moved.map(t=>t.id));
+    context.fingerprint=JSON.stringify(preview);
+    const row=(t,waiting)=>'<li class="preview-task '+(ids.has(t.id)?'incoming':'')+'"><span>'+(waiting?'Не помещается':time(t.start)+'–'+time(t.end))+'</span><div><strong>'+esc(t.title)+'</strong><small>'+(ids.has(t.id)?'Переносим · ':'Уже на завтра · ')+duration(t.duration)+(t.time?' · время сохранено':'')+'</small></div></li>';
+    $('dialogFields').innerHTML='<p class="preview-intro">С '+fmtDate(context.from)+' на '+fmtDate(context.to)+'. Выбери, что перенести, и посмотри будущий план. Изменения сохранятся после подтверждения.</p><div class="move-selection">'+candidates.map(t=>'<label><input type="checkbox" data-move-task="'+esc(t.id)+'" '+(context.selected.has(t.id)?'checked':'')+'><span>'+esc(t.title)+'<small>'+duration(t.duration)+'</small></span>'+priorityTag(t)+'</label>').join('')+'</div><h3 class="preview-heading">Завтра · '+preview.moved.length+' к переносу</h3>'+(preview.placed.length?'<ol class="preview-plan">'+preview.placed.map(t=>row(t,false)).join('')+'</ol>':'<p class="status-note">Запланированных дел пока нет.</p>')+(preview.waiting.length?'<div class="notice warning">Не помещается: '+preview.waiting.length+(preview.conflicts.length?'. Есть пересечения по времени':'')+'. Эти дела останутся в списке на завтра без свободного слота. Время встреч сохраняется.</div><ol class="preview-plan">'+preview.waiting.map(t=>row(t,true)).join('')+'</ol>':'');
+  }
+  function openMovePreview() {
+    const to=planner.nextDate(day), candidates=dailyTasks().filter(t=>!t.done);if(!to){toast('Не удалось выбрать следующий день.');return;}if(!candidates.length){toast('На этот день нет невыполненных дел для переноса.');return;}
+    const context={from:day,to,selected:new Set(candidates.map(t=>t.id)),scope:state.user?.uid||'anonymous',fingerprint:''};
+    openEditor('Перенести на завтра','',async()=>{
+      if((state.user?.uid||'anonymous')!==context.scope)throw new Error('Аккаунт изменился. Открой перенос заново.');
+      if(!context.selected.size)throw new Error('Выбери хотя бы одно дело.');
+      const preview=movePlan(context);if(JSON.stringify(preview)!==context.fingerprint){showMovePreview(context);throw new Error('План изменился после синхронизации. Проверь обновлённый просмотр и подтверди ещё раз.');}
+      if(!preview.moved.length)throw new Error('Эти дела уже выполнены или перенесены.');
+      const stamp=new Date().toISOString();
+      for(const task of preview.moved){const original=getTask(task.id);const record={...cleanTask(task),id:original?.month===task.month?task.id:uid(),lastMovedAt:stamp,lastMovedDate:nowDate(),goalId:task.goalId&&getRecord(task.goalId)?.month===task.month?task.goalId:"",createdAt:task.createdAt||Date.now()};store.put(record);if(record.id!==task.id&&getRecord(task.id))store.remove(task.id);}
+      movePreview=null;changeDay(context.to);location.hash='day';toast('Перенесено дел: '+preview.moved.length+'.'+(preview.waiting.length?' Проверь дела без свободного времени.':''));
+    });
+    movePreview=context;showMovePreview(context);$('saveDialog').textContent='Перенести выбранное';
+  }
+  function weekSummary() {
+    const source=allRecords(), bounds=weekly.summarize(source,{anchorDate:day});
+    return weekly.summarize(source,{anchorDate:day,tasks:bounds.days.flatMap(d=>planner.tasksForDay(source,d.date))});
+  }
+  function weekTeaser() {
+    const w=weekSummary();return '<section class="panel week-teaser">'+panelHead('Твоя неделя','week','Посмотреть итоги')+'<div><strong>'+w.completed+' <span>/ '+w.total+'</span></strong><p>дел выполнено · '+duration(w.completedMinutes)+' для важного</p></div><div class="progress-track"><div class="progress-fill" style="width:'+w.completionPercent+'%"></div></div><p class="status-note">'+fmtDate(w.startDate)+' — '+fmtDate(w.endDate)+' · прогресс целей, переносы и расходы в одном месте.</p></section>';
+  }
+  function weeklyView() {
+    const w=weekSummary(), finance=w.finances.filter(f=>f.expenseCount||f.incomeCount);
+    const taskLinks=(items,postponed)=>items.map(t=>'<button type="button" class="report-task" data-action="report-day" data-id="'+esc(t.date)+'"><span><strong>'+esc(t.title)+'</strong><small>'+fmtDate(t.date)+(postponed?' · '+t.count+' переносов за всё время':' · '+duration(t.duration))+'</small></span><span>↗</span></button>').join('');
+    return head('Неделя в деталях.','Небольшой обзор того, что получилось и чему ещё нужно внимание.')+'<div class="week-controls"><div class="date-arrows"><button type="button" data-action="prev-week" aria-label="Предыдущая неделя">‹</button><button type="button" data-action="next-week" aria-label="Следующая неделя">›</button></div><strong>'+fmtDate(w.startDate)+' — '+fmtDate(w.endDate,{day:'numeric',month:'long',year:'numeric'})+'</strong><button class="text-link" type="button" data-action="today">Текущая неделя</button></div><div class="stats">'+stat('Дела выполнены',w.completed+' / '+w.total,w.completionPercent+'% недельного плана','check')+stat('Время на выполненное',duration(w.completedMinutes),'По длительности отмеченных дел','clock')+stat('Цели завершены',String(w.completedGoals.length),'По текущим данным связанных целей','target')+'</div><div class="columns"><div class="stack"><section class="panel">'+panelHead('В своём темпе')+'<div class="week-chart">'+w.days.map(d=>'<button type="button" class="week-day" data-action="report-day" data-id="'+d.date+'" aria-label="'+esc(fmtDate(d.date,{weekday:'long',day:'numeric',month:'long'}))+': выполнено '+d.completed+' из '+d.total+'"><span>'+d.completed+'/'+d.total+'</span><div class="week-column"><i style="height:'+(d.completed?Math.max(5,100*d.completed/d.total):0)+'%"></i></div><strong>'+fmtDate(d.date,{weekday:'short'})+'</strong><small>'+d.date.slice(8)+'</small></button>').join('')+'</div><p class="status-note">Нажми на день, чтобы открыть его дела.</p></section><section class="panel">'+panelHead('Прогресс целей')+(w.goalProgress.length?w.goalProgress.map(g=>'<div class="goal-mini"><div class="goal-mini-top"><span>'+esc(g.title)+'</span><small>'+g.progressPercent+'%</small></div><div class="progress-track"><div class="progress-fill" style="width:'+g.progressPercent+'%"></div></div><small>На этой неделе '+g.weekCompleted+' из '+g.weekTotal+' шагов'+(g.achieved?' · цель достигнута':'')+'</small></div>').join(''):'<p class="status-note">На этой неделе пока нет дел, связанных с целями месяца.</p>')+'</section><section class="panel">'+panelHead('Что переносится')+(w.postponed.length?taskLinks(w.postponed,true):'<p class="status-note">У дел этой недели пока нет переносов.</p>')+'<p class="status-note">Показаны дела этой недели и число их переносов за всё время. Это поможет заметить задачи, которые стоит упростить.</p></section></div><div class="stack"><section class="panel">'+panelHead('Важное ещё впереди')+(w.highPriorityPending.length?taskLinks(w.highPriorityPending,false):'<p class="status-note">Незавершённых дел с высоким приоритетом на этой неделе нет.</p>')+'</section><section class="panel">'+panelHead('Деньги за неделю')+(finance.length?finance.map(f=>'<div class="weekly-finance"><h3>'+f.currency+'</h3><div class="budget-line"><span>Расходы</span><strong>'+money(f.spent,f.currency)+'</strong></div><div class="budget-line"><span>Дополнительный доход</span><strong>'+money(f.income,f.currency)+'</strong></div>'+Object.entries(f.categories).filter(([,n])=>n>0).map(([k,n])=>'<div class="budget-line weekly-category"><span>'+envelopeNames[k]+'</span><strong>'+money(n,f.currency)+'</strong></div>').join('')+'</div>').join(''):'<p class="status-note">Запиши расходы или поступления — здесь появятся итоги по валютам.</p>')+'<p class="status-note">Валюты учитываются отдельно. Месячная зарплата без даты выплаты не входит в дополнительный доход недели.</p></section></div></div>';
   }
   function readAmount(data,name,zero=false) {
     const value=Number(data.get(name)||0);
@@ -263,17 +335,29 @@
     }catch(error){toast(error.message||'Не удалось составить шаги.');}finally{planningGoal='';render();}
   }
   function deleteRecord(id) {
+    const task=getTask(id);
+    if(task?.routineId){
+      const original=getRecord(id),occurrence=task.occurrenceDate||task.date,skipId=planner.routineSkipId(task.routineId,occurrence),scope=state.user?.uid||'anonymous';
+      store.put({id:skipId,kind:'routine-skip',month:occurrence.slice(0,7),routineId:task.routineId,occurrenceDate:occurrence,date:occurrence,createdAt:Date.now()});
+      if(original)store.remove(id);
+      toast('Это повторение пропущено. Остальная серия сохранена.',()=>{if((state.user?.uid||'anonymous')!==scope){toast('Вернись в исходный аккаунт для восстановления.');return;}if(original)store.put(original);store.remove(skipId);toast('Повторение восстановлено.');});return;
+    }
     const record=getRecord(id);if(!record)return;
     const removed=[record,...(record.kind==='goal'?Object.values(state.records).filter(r=>r.kind==='task'&&r.goalId===id):[])];
     const scope=state.user?.uid||'anonymous';removed.forEach(r=>store.remove(r.id));
     toast(record.kind==='goal'?'Цель и её шаги удалены.':record.kind==='task'?'Дело удалено. План пересчитан.':record.kind==='income'?'Поступление удалено. Бюджет пересчитан.':record.kind==='commitment'?'Обязательная сумма удалена. Записанные оплаты сохранены.':'Расход удалён.',()=>{if((state.user?.uid||'anonymous')!==scope){toast('Вернись в исходный аккаунт для восстановления.');return;}removed.forEach(r=>store.put(r));toast('Записи восстановлены.');});
   }
-  function changeDay(value) {if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return;day=value;month=day.slice(0,7);store.setPeriod(month,day);render();}
+  function changeDay(value) {if(!planner.validDate(value))return;day=value;month=day.slice(0,7);store.setPeriod(month,day);render();}
   function shiftDay(delta) {const d=new Date(day+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+delta);changeDay(d.toISOString().slice(0,10));}
   document.addEventListener('click',event=>{
     const el=event.target.closest('[data-action]');if(!el||el.disabled)return;
     const action=el.dataset.action,id=el.dataset.id;
-    if(action==='add-task')taskEditor();else if(action==='edit-task')taskEditor(getRecord(id));else if(action==='goal-task')taskEditor(null,id);
+    if(action==='add-task')taskEditor();else if(action==='edit-task')taskEditor(getTask(id));else if(action==='goal-task')taskEditor(null,id);
+    else if(action==='important-only'){importantOnly=!importantOnly;render();}
+    else if(action==='add-routine')routineEditor();else if(action==='edit-routine')routineEditor(getRecord(id));else if(action==='stop-routine')stopRoutine(id);
+    else if(action==='move-preview')openMovePreview();
+    else if(action==='report-day'){importantOnly=false;changeDay(id);location.hash='day';}
+    else if(action==='prev-week')shiftDay(-7);else if(action==='next-week')shiftDay(7);
     else if(action==='add-goal')goalEditor();else if(action==='edit-goal')goalEditor(getRecord(id));else if(action==='plan-goal')void generateGoal(id);
     else if(action==='edit-budget')budgetEditor();else if(action==='add-expense')expenseEditor();else if(action==='edit-expense')expenseEditor(getRecord(id));
     else if(action==='currency')setCurrency(id);
@@ -287,15 +371,16 @@
     }
     else if(action==='pay-commitment'){const c=getRecord(id),allocation=budget().commitmentAllocations.find(r=>r.id===id);if(c)expenseEditor({title:c.title,amount:Math.max(0.01,c.amount-(allocation?.spent||0)),currency:recordCurrency(c),date:day,category:'essentials',commitmentId:c.id,commitmentTitle:c.title});}
     else if(action==='delete')deleteRecord(id);else if(action==='account')void store.signInOut().catch(e=>toast(e.message));
-    else if(action==='open-task-day'){const task=getRecord(id);if(task){changeDay(task.date);location.hash='day';}}
+    else if(action==='open-task-day'){const task=getTask(id);if(task){importantOnly=false;changeDay(task.date);location.hash='day';}}
     else if(action==='prev-day')shiftDay(-1);else if(action==='next-day')shiftDay(1);else if(action==='today')changeDay(nowDate());
     else if(action==='export'){
-      const blob=new Blob([JSON.stringify({app:'HVF',version:2,month,exportedAt:new Date().toISOString(),records:Object.values(state.records).filter(r=>r.month===month)},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='HVF-'+month+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+      const blob=new Blob([JSON.stringify({app:'HVF',version:2,month,exportedAt:new Date().toISOString(),records:allRecords().filter(r=>r.month===month||r.kind==='routine'||r.kind==='finance-preferences')},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='HVF-'+month+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     }
   });
   document.addEventListener('change',event=>{
     const el=event.target;
-    if(el.dataset.taskCheck){const task=getRecord(el.dataset.taskCheck);if(task)store.put({...task,done:el.checked});}
+    if(el.dataset.taskCheck){const task=getTask(el.dataset.taskCheck);if(task)store.put({...cleanTask(task),done:el.checked,completedDate:el.checked?nowDate():'',completedAt:el.checked?new Date().toISOString():'',createdAt:task.createdAt||Date.now()});}
+    else if(el.dataset.moveTask&&movePreview){if(el.checked)movePreview.selected.add(el.dataset.moveTask);else movePreview.selected.delete(el.dataset.moveTask);showMovePreview(movePreview);$('formError').textContent='';}
     else if(el.id==='dayPicker')changeDay(el.value);
     else if(el.id==='aiEnabled'){ai.setEnabled(el.checked);toast(el.checked?'Нейросеть включена. Модель загрузится при первом запросе.':'Включена простая приблизительная оценка.');}
   });
@@ -308,7 +393,7 @@
     event.preventDefault();if(busy||!submitEditor)return;
     const save=submitEditor, data=new FormData(event.target),scope=state.user?.uid||'anonymous',formMonth=month;
     busy=true;$('saveDialog').disabled=true;$('saveDialog').textContent='Сохраняю…';$('formError').textContent='';
-    try{await saveGuarded(save,data,scope,formMonth);$('editor').close();}catch(error){$('formError').textContent=error.message||'Не удалось сохранить.';}finally{busy=false;$('saveDialog').disabled=false;$('saveDialog').textContent='Сохранить';render();}
+    try{await saveGuarded(save,data,scope,formMonth);$('editor').close();movePreview=null;}catch(error){$('formError').textContent=error.message||'Не удалось сохранить.';}finally{busy=false;$('saveDialog').disabled=false;$('saveDialog').textContent=movePreview?'Перенести выбранное':'Сохранить';render();}
   });
   async function saveGuarded(save,data,scope,formMonth){
     // Account/period navigation is locked while a form has an asynchronous estimate.
@@ -317,15 +402,15 @@
   }
   $('monthPicker').addEventListener('change',event=>{const value=event.target.value;if(!/^\d{4}-\d{2}$/.test(value)||busy)return;month=value;day=month===nowDate().slice(0,7)?nowDate():month+'-01';store.setPeriod(month,day);render();});
   $('accountButton').addEventListener('click',()=>{if(!busy)void store.signInOut().catch(e=>toast(e.message));});
-  function closeEditor(){if(busy){toast('Дождись оценки времени. Прогресс — в настройках.');return;}$('editor').close();}
+  function closeEditor(){if(busy){toast('Дождись сохранения.');return;}$('editor').close();movePreview=null;}
   $('closeDialog').addEventListener('click',closeEditor);$('cancelDialog').addEventListener('click',closeEditor);
-  $('editor').addEventListener('cancel',e=>{if(busy)e.preventDefault();});
+  $('editor').addEventListener('cancel',e=>{if(busy)e.preventDefault();else movePreview=null;});
   $('editor').addEventListener('click',event=>{if(event.target===$('editor')){const r=$('editor').getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)closeEditor();}});
   $('closeToast').addEventListener('click',()=>$('toast').hidden=true);$('undoButton').addEventListener('click',()=>{const fn=undoAction;undoAction=null;$('toast').hidden=true;if(fn)fn();});
   window.addEventListener('hashchange',()=>{render();window.scrollTo(0,0);});
   window.addEventListener('hvf-pwa-status',()=>{if(view==='settings')$('installationPanel').innerHTML=installationContent();});
   let lastScope=state.user?.uid||'anonymous';
-  store.subscribe(next=>{const nextScope=next.user?.uid||'anonymous';if(lastScope!==nextScope&&$('editor').open){$('editor').close();submitEditor=null;toast('Аккаунт изменился. Открой форму заново.');}lastScope=nextScope;state=next;render();});
+  store.subscribe(next=>{const nextScope=next.user?.uid||'anonymous';if(lastScope!==nextScope&&$('editor').open){$('editor').close();submitEditor=null;movePreview=null;toast('Аккаунт изменился. Открой форму заново.');}lastScope=nextScope;state=next;render();});
   ai.subscribe(status=>{const el=$('aiStatus');if(el)el.textContent=typeof status==='string'?status:status?.message||'';});
   store.setPeriod(month,day);render();void store.init();
 }());

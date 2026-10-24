@@ -5,6 +5,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const core = require('../assistant-core.js');
 const extras = require('../assistant-extras.js');
+const planner = require('../assistant-planner.js');
+const weekly = require('../assistant-weekly.js');
 
 const source = fs.readFileSync(path.join(__dirname, '../assistant-ui.js'), 'utf8');
 const MONTH = '2026-10';
@@ -25,6 +27,7 @@ function createUI(initial = [], options = {}) {
   };
   const subscribers = [];
   const periods = [];
+  const writes = [];
 
   function node(id) {
     if (nodes.has(id)) return nodes.get(id);
@@ -63,14 +66,18 @@ function createUI(initial = [], options = {}) {
   const store = {
     getState: () => clone(current),
     subscribe(callback) { subscribers.push(callback); },
-    put(record) { current.records[record.id] = clone(record); publish(); },
-    remove(id) { delete current.records[id]; publish(); },
+    put(record) { writes.push({ action: 'put', record: clone(record) }); current.records[record.id] = clone(record); publish(); },
+    remove(id) { writes.push({ action: 'remove', id }); delete current.records[id]; publish(); },
     setPeriod(month, day) { periods.push({ month, day }); },
     init: async () => {}, signInOut: async () => {}
   };
-  const location = { hash: '#money' };
+  let currentHash = '#money';
+  const location = {
+    get hash() { return currentHash; },
+    set hash(value) { const text = String(value); currentHash = text && !text.startsWith('#') ? '#' + text : text; }
+  };
   const window = {
-    HVFCore: core, HVFExtras: extras, HVFStore: store,
+    HVFCore: core, HVFExtras: extras, HVFPlanner: planner, HVFWeekly: weekly, HVFStore: store,
     HVFPWA: options.pwa,
     HVFAI: {
       isEnabled: () => false, getStatus: () => 'Локальная оценка',
@@ -100,13 +107,22 @@ function createUI(initial = [], options = {}) {
   }, { filename: 'assistant-ui.js' });
 
   return {
-    node, periods,
+    node, periods, writes,
     records: kind => Object.values(clone(current.records)).filter(record => !kind || record.kind === kind),
     html: () => normalize(node('content').innerHTML),
     fields: () => normalize(node('dialogFields').innerHTML),
     click(action, id) {
       const target = { dataset: { action, id }, disabled: false };
+      const previousHash = location.hash;
       documentEvents.get('click')({ target: { closest: () => target } });
+      if (location.hash !== previousHash) windowEvents.get('hashchange')?.();
+    },
+    change(dataset, checked, extra = {}) { documentEvents.get('change')({ target: { dataset, checked, ...extra } }); },
+    upsert(record) { current.records[record.id] = clone(record); publish(); },
+    account(uid, records = []) {
+      current = { ...current, user: uid ? { uid, email: uid + '@example.test' } : null,
+        records: Object.fromEntries(records.map(record => [record.id, clone(record)])) };
+      publish();
     },
     async submit(values, expectedError = '') {
       assert.equal(node('editor').open, true, 'an editor must be open before saving');
@@ -146,6 +162,24 @@ async function commitment(ui, title, amount) {
   ui.click('add-commitment');
   await ui.submit({ title, amount: String(amount), currency: 'BYN', dueDay: '25' });
   return ui.records('commitment').find(record => record.title === title);
+}
+
+const dayTask = (id, values = {}) => ({
+  id, kind: 'task', month: MONTH, date: DAY, title: id, duration: 30,
+  time: '', priority: 1, done: false, ...values,
+});
+const recurring = (values = {}) => ({
+  id: 'tutor-series', kind: 'routine', month: '2000-02', title: 'Репетитор',
+  weekdays: [5], startDate: DAY, untilDate: '', duration: 60, time: '18:00', priority: 2,
+  ...values,
+});
+const taskFields = (values = {}) => ({
+  title: 'Новое дело', date: DAY, time: '', duration: '30', priority: '1', goalId: '', ...values,
+});
+const changeDay = (ui, date) => ui.change({}, false, { id: 'dayPicker', value: date });
+function taskMarkup(ui, id) {
+  return [...ui.html().matchAll(/<article class="task-row[^\"]*">[\s\S]*?<\/article>/g)]
+    .map(match => match[0]).find(markup => markup.includes('data-task-check="' + id + '"')) || '';
 }
 
 test('new users see BYN while existing records without currency remain in RUB', () => {
@@ -421,4 +455,286 @@ test('an unavailable native installation opens platform instructions with sync g
   assert.match(ui.fields(), /один Google-аккаунт на каждом устройстве/);
   assert.match(ui.fields(), /https:\/\/support\.google\.com\/chrome\/answer\/9658361/);
   assert.equal(ui.node('saveDialog').textContent, 'Понятно');
+});
+
+test('priority labels and important-only filtering preserve the complete day schedule', async () => {
+  const ui = createUI([
+    { id: 'rhythm', kind: 'settings', month: MONTH, start: '09:00', end: '12:00', breakMinutes: 0 },
+    dayTask('appointment', { title: 'Обычная встреча', time: '09:00', duration: 60 }),
+    dayTask('important', { title: 'Важная работа', priority: 2 }),
+    dayTask('low', { title: 'Мелочь', priority: 0 }),
+  ]);
+  ui.navigate('#day');
+  assert.match(taskMarkup(ui, 'appointment'), /priority-1">Обычный приоритет/);
+  assert.match(taskMarkup(ui, 'important'), /priority-2">Высокий приоритет/);
+  assert.match(taskMarkup(ui, 'low'), /priority-0">Низкий приоритет/);
+  assert.match(taskMarkup(ui, 'important'), /class="task-time">10:00<small>10:30/);
+
+  ui.click('important-only');
+  assert.equal(taskMarkup(ui, 'appointment'), '');
+  assert.equal(taskMarkup(ui, 'low'), '');
+  assert.match(taskMarkup(ui, 'important'), /class="task-time">10:00<small>10:30/,
+    'hiding an ordinary appointment must not free its occupied slot');
+  assert.equal(ui.writes.length, 0, 'a visual filter does not alter any task');
+  ui.click('important-only');
+  ui.click('edit-task', 'low');
+  assert.match(ui.fields(), /Высокий · коралловый/);
+  assert.match(ui.fields(), /Обычный · зелёный/);
+  assert.match(ui.fields(), /Низкий · серый/);
+  await ui.submit(taskFields({ title: 'Теперь важное', priority: '2' }));
+  assert.equal(ui.records('task').find(record => record.id === 'low').priority, 2);
+  assert.match(taskMarkup(ui, 'low'), /priority-2">Высокий приоритет/);
+});
+
+test('recurring creation validates weekdays and completion materializes only the chosen occurrence', async () => {
+  const ui = createUI();
+  ui.navigate('#day');
+  ui.click('add-routine');
+  const values = {
+    title: 'Английский', startDate: DAY, untilDate: '', duration: '45', time: '18:00', priority: '2',
+  };
+  await ui.submit(values, /Выбери дни недели/);
+  assert.equal(ui.records().length, 0);
+  await ui.submit({ ...values, weekday2: '2', weekday5: '5' });
+  const [rule] = ui.records('routine');
+  assert.deepEqual(rule.weekdays, [2, 5]);
+  assert.equal(rule.month, '2000-02');
+  assert.equal(ui.records('task').length, 0, 'future repetitions are virtual until separately changed');
+  const currentId = planner.routineTaskId(rule.id, DAY);
+  assert.ok(taskMarkup(ui, currentId));
+
+  ui.change({ taskCheck: currentId }, true);
+  const [completed] = ui.records('task');
+  assert.equal(completed.id, currentId);
+  assert.equal(completed.done, true);
+  assert.equal(completed.completedDate, DAY);
+  assert.equal(completed.occurrenceDate, DAY);
+  assert.equal(completed.virtual, undefined, 'view-only fields never become persistent data');
+  changeDay(ui, '2026-10-24');
+  assert.equal(taskMarkup(ui, planner.routineTaskId(rule.id, '2026-10-24')), '');
+  changeDay(ui, '2026-10-27');
+  assert.match(taskMarkup(ui, planner.routineTaskId(rule.id, '2026-10-27')), /Английский/);
+  assert.doesNotMatch(taskMarkup(ui, planner.routineTaskId(rule.id, '2026-10-27')), /class="task-row done"/);
+  assert.equal(ui.records('task').length, 1);
+  assert.deepEqual(ui.records('routine'), [rule], 'checking one day does not change its series');
+});
+
+test('skipping and undoing a virtual occurrence preserves the rest of its recurring series', async () => {
+  const rule = recurring();
+  const ui = createUI([rule]);
+  ui.navigate('#day');
+  const id = planner.routineTaskId(rule.id, DAY);
+  ui.click('delete', id);
+  assert.equal(taskMarkup(ui, id), '');
+  const [skipped] = ui.records('routine-skip');
+  assert.equal(skipped.id, planner.routineSkipId(rule.id, DAY));
+  assert.equal(skipped.occurrenceDate, DAY);
+  assert.equal(ui.records('task').length, 0);
+  changeDay(ui, '2026-10-30');
+  assert.ok(taskMarkup(ui, planner.routineTaskId(rule.id, '2026-10-30')));
+  await ui.node('undoButton').fire('click');
+  assert.equal(ui.records('routine-skip').length, 0);
+  assert.equal(ui.records('task').length, 0);
+  changeDay(ui, DAY);
+  assert.ok(taskMarkup(ui, id));
+  assert.deepEqual(ui.records('routine'), [rule]);
+});
+
+test('editing then deleting a single recurring occurrence restores exactly that edit on undo', async () => {
+  const rule = recurring();
+  const ui = createUI([rule]);
+  ui.navigate('#day');
+  const id = planner.routineTaskId(rule.id, DAY);
+  ui.click('edit-task', id);
+  assert.match(ui.fields(), /Изменится только это повторение/);
+  await ui.submit(taskFields({ title: 'Занятие перенесли на утро', time: '10:00', duration: '45', priority: '0' }));
+  const [edited] = ui.records('task');
+  assert.equal(edited.id, id);
+  assert.equal(edited.routineId, rule.id);
+  assert.equal(edited.priority, 0);
+  assert.deepEqual(ui.records('routine'), [rule]);
+  changeDay(ui, '2026-10-30');
+  const future = taskMarkup(ui, planner.routineTaskId(rule.id, '2026-10-30'));
+  assert.match(future, /Репетитор/);
+  assert.doesNotMatch(future, /Занятие перенесли/);
+  changeDay(ui, DAY);
+  ui.click('delete', id);
+  assert.equal(ui.records('task').length, 0);
+  assert.equal(ui.records('routine-skip').length, 1);
+  await ui.node('undoButton').fire('click');
+  assert.deepEqual(ui.records('task'), [edited]);
+  assert.equal(ui.records('routine-skip').length, 0);
+  assert.match(taskMarkup(ui, id), /Занятие перенесли на утро/);
+});
+
+test('move preview is read-only, supports deselection and cancellation, and keeps completed tasks in place', async () => {
+  const original = [dayTask('move-me'), dayTask('leave-me'), dayTask('completed', { done: true })];
+  const ui = createUI(original);
+  ui.navigate('#day');
+  ui.click('move-preview');
+  assert.equal(ui.node('dialogTitle').textContent, 'Перенести на завтра');
+  assert.match(ui.fields(), /2 к переносу/);
+  assert.doesNotMatch(ui.fields(), /data-move-task="completed"/);
+  assert.deepEqual(ui.records(), original);
+  assert.equal(ui.writes.length, 0);
+  ui.change({ moveTask: 'leave-me' }, false);
+  assert.match(ui.fields(), /1 к переносу/);
+  await ui.node('cancelDialog').fire('click');
+  assert.equal(ui.node('editor').open, false);
+  assert.equal(ui.writes.length, 0);
+
+  ui.click('move-preview');
+  assert.match(ui.fields(), /2 к переносу/, 'reopening a cancelled preview resets the selection');
+  ui.change({ moveTask: 'leave-me' }, false);
+  await ui.submit({});
+  const byId = Object.fromEntries(ui.records('task').map(record => [record.id, record]));
+  assert.equal(byId['move-me'].date, '2026-10-24');
+  assert.equal(byId['move-me'].moveCount, 1);
+  assert.equal(byId['move-me'].movedFromDate, DAY);
+  assert.equal(byId['move-me'].lastMovedDate, DAY);
+  assert.equal(byId['leave-me'].date, DAY);
+  assert.equal(byId.completed.date, DAY);
+  assert.equal(byId.completed.done, true);
+  assert.equal(ui.node('editor').open, false);
+});
+
+test('move preview requires a selection and retains fixed-time conflicts after confirmation', async () => {
+  const tomorrow = '2026-10-24';
+  const ui = createUI([
+    dayTask('source-fixed', { title: 'Исходная встреча', time: '10:00', duration: 60 }),
+    dayTask('tomorrow-fixed', { title: 'Уже назначено', date: tomorrow, time: '10:00', duration: 60 }),
+  ]);
+  ui.navigate('#day');
+  ui.click('move-preview');
+  assert.match(ui.fields(), /Есть пересечения по времени/);
+  assert.match(ui.fields(), /Не помещается: 1/);
+  assert.equal(ui.writes.length, 0);
+  ui.change({ moveTask: 'source-fixed' }, false);
+  await ui.submit({}, /Выбери хотя бы одно дело/);
+  assert.equal(ui.writes.length, 0);
+  ui.change({ moveTask: 'source-fixed' }, true);
+  await ui.submit({});
+  assert.equal(ui.records('task').find(record => record.id === 'source-fixed').time, '10:00');
+  assert.equal(ui.records('task').find(record => record.id === 'tomorrow-fixed').time, '10:00');
+  assert.match(taskMarkup(ui, 'source-fixed'), /Не влезло/);
+  assert.match(ui.html(), /пересекаются с другими встречами/);
+});
+
+test('cross-month move assigns new persistence IDs and never regenerates the original recurring occurrence', async () => {
+  const from = '2026-10-31';
+  const rule = recurring({ weekdays: [6], startDate: from });
+  const id = planner.routineTaskId(rule.id, from);
+  const savedOccurrence = dayTask(id, {
+    title: 'Особое занятие', date: from, routineId: rule.id, occurrenceDate: from, priority: 0,
+  });
+  const goal = { id: 'october-goal', kind: 'goal', month: MONTH, title: 'Октябрьская цель' };
+  const ui = createUI([rule, savedOccurrence, goal, dayTask('ordinary', { date: from, goalId: goal.id })]);
+  ui.navigate('#day'); changeDay(ui, from);
+  ui.click('move-preview');
+  assert.equal(ui.writes.length, 0);
+  await ui.submit({});
+  const tasks = ui.records('task');
+  assert.equal(tasks.length, 2);
+  assert.ok(tasks.every(record => record.month === '2026-11' && record.date === '2026-11-01'));
+  assert.ok(tasks.every(record => record.id !== id && record.id !== 'ordinary'));
+  assert.equal(tasks.find(record => record.title === 'ordinary').goalId, '', 'a monthly goal link is cleared when its step moves to another month');
+  const movedOccurrence = tasks.find(record => record.routineId === rule.id);
+  assert.equal(movedOccurrence.occurrenceDate, from);
+  assert.equal(movedOccurrence.priority, 0);
+  assert.equal(planner.tasksForDay(ui.records(), from).length, 0);
+  assert.equal(planner.tasksForDay(ui.records(), '2026-11-01').length, 2);
+  assert.equal(planner.tasksForDay(ui.records(), '2026-11-07').length, 1);
+  assert.deepEqual(ui.periods.at(-1), { month: '2026-11', day: '2026-11-01' });
+});
+
+test('stopping a recurring series preserves history and separately edited future occurrences', async () => {
+  const rule = recurring({ startDate: '2026-10-16' });
+  const futureDate = '2026-10-30';
+  const exception = dayTask('special-future', { date: futureDate, routineId: rule.id, occurrenceDate: futureDate });
+  const ui = createUI([rule, exception]);
+  ui.navigate('#day');
+  ui.click('stop-routine', rule.id);
+  assert.equal(ui.writes.length, 0, 'opening the stop confirmation does not alter the series');
+  await ui.submit({});
+  assert.equal(ui.records('routine')[0].untilDate, '2026-10-22');
+  assert.equal(planner.tasksForDay(ui.records(), '2026-10-16').length, 1);
+  assert.equal(planner.tasksForDay(ui.records(), DAY).length, 0);
+  assert.equal(planner.tasksForDay(ui.records(), futureDate)[0].id, exception.id);
+  assert.equal(planner.tasksForDay(ui.records(), '2026-11-06').length, 0);
+  await ui.node('undoButton').fire('click');
+  assert.deepEqual(ui.records('routine')[0], rule);
+  assert.equal(planner.tasksForDay(ui.records(), '2026-11-06').length, 1);
+});
+
+test('stopping before the series begins retains valid dates and prevents future generation', async () => {
+  const rule = recurring({ startDate: '2026-11-06' });
+  const ui = createUI([rule]);
+  ui.navigate('#day'); ui.click('stop-routine', rule.id);
+  await ui.submit({});
+  const stopped = ui.records('routine')[0];
+  assert.equal(stopped.active, false);
+  assert.equal(stopped.startDate, rule.startDate);
+  assert.equal(planner.validateRoutine(stopped).valid, true);
+  assert.equal(planner.tasksForDay(ui.records(), rule.startDate).length, 0);
+});
+
+test('synchronization during move preview requires review before applying the changed plan', async () => {
+  const ui = createUI([dayTask('to-move')]);
+  ui.navigate('#day');
+  ui.click('move-preview');
+  ui.upsert(dayTask('arrived-from-phone', { title: 'Встреча с телефона', date: '2026-10-24', time: '09:00', duration: 60 }));
+  await ui.submit({}, /План изменился после синхронизации/);
+  assert.equal(ui.writes.length, 0);
+  assert.equal(ui.records('task').find(record => record.id === 'to-move').date, DAY);
+  assert.match(ui.fields(), /Встреча с телефона/);
+  await ui.submit({});
+  assert.equal(ui.records('task').find(record => record.id === 'to-move').date, '2026-10-24');
+  assert.equal(ui.records('task').find(record => record.id === 'arrived-from-phone').time, '09:00');
+});
+
+test('changing accounts closes a pending move preview and prevents saving into the new account', () => {
+  const ui = createUI([dayTask('alice-task')]);
+  ui.account('alice', [dayTask('alice-task')]);
+  ui.navigate('#day'); ui.click('move-preview');
+  assert.equal(ui.node('editor').open, true);
+  ui.account('bob');
+  assert.equal(ui.node('editor').open, false);
+  assert.equal(ui.records().length, 0);
+  assert.equal(ui.writes.length, 0);
+  assert.match(ui.node('toastText').textContent, /Аккаунт изменился/);
+});
+
+test('weekly route combines task progress and separate currency totals within the selected week', () => {
+  const ui = createUI([
+    { id: 'goal', kind: 'goal', month: MONTH, title: 'Учиться', target: 0 },
+    dayTask('finished', { title: 'Завершённый шаг', date: '2026-10-20', done: true, goalId: 'goal', completedDate: '2026-10-20' }),
+    dayTask('pending', { title: 'Важный шаг', date: '2026-10-22', priority: 2, goalId: 'goal', moveCount: 3, lastMovedDate: '2026-10-22' }),
+    { id: 'monthly-salary', kind: 'budget', month: MONTH, income: 2000, currency: 'BYN' },
+    { id: 'byn-expense', kind: 'expense', month: MONTH, date: DAY, amount: 100, currency: 'BYN', category: 'essentials' },
+    { id: 'usd-expense', kind: 'expense', month: MONTH, date: DAY, amount: 5, currency: 'USD', category: 'flexible' },
+    { id: 'rub-expense', kind: 'expense', month: MONTH, date: DAY, amount: 200, currency: 'RUB', category: 'reserve' },
+    { id: 'gift', kind: 'income', month: MONTH, date: DAY, amount: 50, currency: 'BYN' },
+    { id: 'usd-income', kind: 'income', month: MONTH, date: DAY, amount: 10, currency: 'USD' },
+    { id: 'outside-week', kind: 'expense', month: MONTH, date: '2026-10-18', amount: 999, currency: 'BYN', category: 'flexible' },
+  ]);
+  ui.navigate('#week');
+  assert.match(ui.html(), /Неделя в деталях/);
+  assert.equal(statValue(ui, 'Дела выполнены'), '1 / 2');
+  assert.equal(statValue(ui, 'Время на выполненное'), '30 мин');
+  assert.match(ui.html(), /На этой неделе 1 из 2 шагов/);
+  assert.match(ui.html(), /3 переносов за всё время/);
+  assert.match(ui.html(), /Важный шаг/);
+  for (const amount of ['100 BYN', '50 BYN', '5 USD', '10 USD', '200 RUB']) assert.ok(ui.html().includes(amount), amount);
+  assert.doesNotMatch(ui.html(), /999 BYN|2 000 BYN/);
+  ui.click('currency', 'USD');
+  assert.match(ui.html(), /100 BYN/);
+  assert.match(ui.html(), /200 RUB/);
+  ui.click('prev-week');
+  assert.equal(statValue(ui, 'Дела выполнены'), '0 / 0');
+  assert.match(ui.html(), /999 BYN/);
+  assert.doesNotMatch(ui.html(), /100 BYN/);
+  ui.click('next-week');
+  ui.click('report-day', '2026-10-22');
+  assert.match(ui.html(), /День в твоём ритме/);
+  assert.ok(taskMarkup(ui, 'pending'));
 });

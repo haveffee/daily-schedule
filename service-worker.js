@@ -2,14 +2,14 @@
  * Firebase requests, AI downloads, auth callbacks and arbitrary URLs do not. */
 "use strict";
 
-const SHELL_VERSION = "2026-10-23-1";
+const SHELL_VERSION = "2026-10-24-1";
 const SCOPE_URL = new URL("./", self.registration.scope);
 const CACHE_PREFIX = "hvf-shell:" + SCOPE_URL.pathname + ":";
 const CACHE_NAME = CACHE_PREFIX + SHELL_VERSION;
 const SHELL_FILES = [
-  "index.html", "assistant.css", "assistant-finance.css", "firebase-config.js",
+  "index.html", "assistant.css", "assistant-finance.css", "assistant-planner.css", "firebase-config.js",
   "assistant-core.js", "assistant-store.js", "assistant-ai.js", "assistant-extras.js",
-  "assistant-ui.js", "pwa.js", "manifest.webmanifest", "favicon.svg",
+  "assistant-planner.js", "assistant-weekly.js", "assistant-ui.js", "pwa.js", "manifest.webmanifest", "favicon.svg",
   "icon-192.png", "icon-512.png", "apple-touch-icon.png"
 ];
 const SHELL_URLS = new Set(SHELL_FILES.map(file => new URL(file, SCOPE_URL).href));

@@ -1,0 +1,135 @@
+/* Personal planning: priorities, recurring tasks, move preview and weekly report. */
+.task-tags{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:8px}
+.task-copy .task-tags .tag{margin-top:0;max-width:100%;white-space:normal}
+.priority-2,.priority-1,.priority-0{gap:5px}
+.priority-2{color:#a34d3b;background:#fff0eb}
+.priority-1{color:#466b51;background:#edf4e9}
+.priority-0{color:#66716b;background:#eff1ee}
+.priority-2::before,.priority-1::before,.priority-0::before{content:'';display:inline-block;flex:none;width:5px;height:5px;border-radius:50%;background:currentColor}
+.repeat-tag{color:var(--green);background:var(--soft)}
+
+.planner-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px}
+.planner-toolbar .button,.planner-toolbar .text-link,.filter-chip{min-height:44px}
+.planner-toolbar .text-link{display:inline-flex;align-items:center;margin-left:auto;padding:8px 3px}
+.filter-chip{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--muted);padding:9px 12px;font-size:10px;font-weight:700;line-height:1.5}
+.filter-chip.selected{color:#a34d3b;background:#fff0eb;border-color:#edc9be}
+.planner-hint{margin:0 0 17px;font-size:10px;color:var(--muted);line-height:1.8}
+.routine-panel>.button{min-height:44px;margin-top:14px}
+.routine-row{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:18px 0;border-top:1px solid var(--line)}
+.routine-row>div:first-child{min-width:0}
+.routine-row h3{font-size:12px;font-weight:600;overflow-wrap:anywhere}
+.routine-row p{font-size:10px;color:var(--muted);margin-top:5px;overflow-wrap:anywhere}
+.routine-row small{display:block;font-size:9px;color:var(--muted);margin-top:5px;line-height:1.7}
+.routine-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:7px;flex-shrink:0}
+.routine-actions .button{min-height:44px}
+
+.weekday-field{min-width:0;margin:0 0 20px;padding:0;border:0}
+.weekday-field legend{margin-bottom:9px;font-size:11px;font-weight:600;color:var(--ink)}
+.weekday-picker{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px}
+.weekday-picker label{position:relative;display:block;min-width:0;cursor:pointer;touch-action:manipulation}
+.weekday-picker input{position:absolute;width:1px;height:1px;margin:0;padding:0;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap}
+.weekday-picker span{display:flex;justify-content:center;align-items:center;min-height:44px;min-width:44px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--muted);font-size:11px;font-weight:700;line-height:1.4}
+.weekday-picker input:checked+span{background:var(--green);border-color:var(--green);color:var(--paper)}
+.weekday-picker input:focus-visible+span{outline:3px solid #a2b76c;outline-offset:3px}
+.weekday-picker input:disabled+span{opacity:.5;cursor:not-allowed}
+
+.preview-intro{font-size:11px;line-height:1.9;color:var(--muted);margin-bottom:18px;overflow-wrap:anywhere}
+.move-selection{display:grid;gap:7px}
+.move-selection label{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:10px;align-items:center;min-height:54px;border:1px solid var(--line);border-radius:11px;padding:10px 12px;cursor:pointer}
+.move-selection label:has(input:checked){background:var(--soft);border-color:#cfdbc7}
+.move-selection input{width:17px;height:17px;margin:0;accent-color:var(--green);cursor:pointer}
+.move-selection label>span:not(.tag){font-size:11px;font-weight:600;overflow-wrap:anywhere}
+.move-selection small{display:block;font-size:9px;color:var(--muted);font-weight:400;margin-top:3px}
+.move-selection .tag{font-size:8px;line-height:1.6;white-space:normal}
+.preview-heading{font-size:13px;font-weight:700;margin:23px 0 12px;overflow-wrap:anywhere}
+.preview-plan{list-style:none;padding:0;margin:0;display:grid;gap:7px}
+.preview-task{display:grid;grid-template-columns:88px minmax(0,1fr);gap:12px;padding:12px;border:1px solid var(--line);border-radius:11px;background:var(--paper);font-size:10px}
+.preview-task>span{color:var(--muted);font-size:9px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.preview-task strong{font-weight:600;font-size:11px;display:block;overflow-wrap:anywhere}
+.preview-task small{display:block;color:var(--muted);font-size:9px;margin-top:4px;line-height:1.7}
+.preview-task.incoming{background:var(--soft);border-color:#cfdbc7}
+.preview-task.incoming>span{color:var(--green)}
+
+.week-teaser>div:not(.panel-head):not(.progress-track)>strong{display:block;font-size:31px;font-weight:600;letter-spacing:-1px;line-height:1.3;color:var(--green)}
+.week-teaser>div:not(.panel-head):not(.progress-track)>strong span{font-size:18px;font-weight:500;color:var(--muted);letter-spacing:-.4px}
+.week-teaser>div:not(.panel-head):not(.progress-track)>p{font-size:10px;color:var(--muted);margin-top:8px}
+.week-teaser .progress-track{margin-top:17px}
+.week-teaser .panel-head .text-link{display:inline-flex;align-items:center;min-height:44px;white-space:normal;text-align:right}
+.week-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-bottom:22px}
+.week-controls .date-arrows button{width:44px;height:44px}
+.week-controls>strong{min-width:0;font-size:12px;font-weight:600;overflow-wrap:anywhere}
+.week-controls>.text-link{min-height:44px;margin-left:auto;display:inline-flex;align-items:center;padding:8px 0;white-space:normal}
+.week-chart{display:grid;grid-template-columns:repeat(7,minmax(44px,1fr));gap:9px;align-items:end;padding:3px 0 6px;min-width:0;max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin}
+.week-day{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:7px;min-width:44px;min-height:44px;padding:8px 4px;border-radius:11px;background:transparent;color:var(--ink);text-align:center}
+.week-day:focus-visible{outline-offset:-3px}
+.week-day>span{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;line-height:1.5;overflow-wrap:anywhere}
+.week-column{position:relative;display:flex;align-items:flex-end;width:100%;max-width:44px;height:110px;overflow:hidden;border-radius:8px;background:var(--soft)}
+.week-column i{display:block;width:100%;min-height:0;max-height:100%;border-radius:8px;background:var(--green)}
+.week-day>strong{font-size:10px;font-weight:600;line-height:1.4;text-transform:capitalize}
+.week-day>small{font-size:9px;color:var(--muted);line-height:1.3;margin-top:-3px}
+.report-task{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:56px;width:100%;padding:13px 0;border-top:1px solid var(--line);background:transparent;color:var(--ink);text-align:left}
+.report-task>span:first-child{min-width:0}
+.report-task>span:last-child{flex-shrink:0;font-size:16px;color:var(--muted)}
+.report-task strong{display:block;font-size:11px;font-weight:600;overflow-wrap:anywhere}
+.report-task small{display:block;font-size:9px;color:var(--muted);line-height:1.7;margin-top:5px;overflow-wrap:anywhere}
+.weekly-finance{display:grid;gap:11px;padding:17px 0;border-top:1px solid var(--line);min-width:0}
+.weekly-finance h3{font-size:11px;letter-spacing:.8px;color:var(--green)}
+.weekly-finance .budget-line{align-items:flex-start;font-size:10px;min-width:0}
+.weekly-finance .budget-line>span{min-width:0;overflow-wrap:anywhere}
+.weekly-finance .budget-line strong{font-size:10px;flex-shrink:0;text-align:right;max-width:60%;overflow-wrap:anywhere}
+.weekly-finance .weekly-category{color:var(--muted);padding-left:11px;position:relative}
+.weekly-category::before{position:absolute;content:'';left:0;top:.6em;width:4px;height:4px;border-radius:50%;background:var(--line)}
+
+.filter-chip,.weekday-picker span,.move-selection label,.week-day,.report-task{transition:background-color .18s ease,border-color .18s ease,color .18s ease}
+.week-column i{transition:height .35s ease}
+@media(hover:hover) and (pointer:fine){
+  .filter-chip:hover{border-color:#bac9b1;color:var(--green)}
+  .filter-chip.selected:hover{border-color:#d59b89;color:#a34d3b}
+  .weekday-picker label:hover span{border-color:var(--green)}
+  .move-selection label:hover{border-color:#bac9b1}
+  .week-day:hover{background:var(--soft)}
+  .report-task:hover{color:var(--green);background:var(--soft)}
+}
+@media(max-width:900px){
+  .routine-row{flex-wrap:wrap;gap:12px}
+  .routine-actions{justify-content:flex-start}
+}
+@media(max-width:650px){
+  .planner-toolbar{gap:7px}
+  .planner-toolbar .button,.filter-chip{font-size:10px;padding:9px 11px}
+  .planner-toolbar .text-link{margin-left:0;padding:8px 4px}
+  .planner-hint{font-size:9px}
+  .routine-row{padding:16px 0;gap:12px}
+  .routine-row>div:first-child{width:100%}
+  .routine-row h3{font-size:12px}
+  .routine-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .routine-actions .button{white-space:normal}
+  .routine-panel>.button{width:100%}
+  .week-controls{gap:8px 11px;margin-bottom:18px}
+  .week-controls>strong{flex:1;font-size:11px}
+  .week-controls>.text-link{margin-left:0;padding:6px 0;font-size:10px}
+  .week-chart{gap:4px}
+  .week-day{gap:6px;padding:7px 2px;border-radius:8px}
+  .week-day>span{font-size:9px}
+  .week-column{height:95px;border-radius:6px}
+  .week-column i{border-radius:6px}
+  .weekly-finance .budget-line{font-size:10px;gap:10px}
+}
+@media(max-width:430px){
+  .weekday-picker{grid-template-columns:repeat(4,minmax(44px,1fr));gap:8px}
+  .weekday-picker span{font-size:12px}
+  .move-selection label{grid-template-columns:18px minmax(0,1fr);padding:10px;gap:7px 10px}
+  .move-selection label>.tag{grid-column:2;justify-self:start}
+  .preview-task{grid-template-columns:1fr;gap:4px;padding:11px}
+  .preview-task>span{font-size:10px}
+  .week-teaser .panel-head{align-items:flex-start}
+  .week-teaser .panel-head .text-link{font-size:9px;max-width:110px}
+  .week-chart{gap:2px}
+  .week-day{padding-left:1px;padding-right:1px}
+  .week-day>span{font-size:8px}
+  .week-day>strong{font-size:9px}
+  .week-column{height:82px}
+}
+@media(prefers-reduced-motion:reduce){
+  .filter-chip,.weekday-picker span,.move-selection label,.week-day,.report-task,.week-column i{transition:none;animation:none}
+}

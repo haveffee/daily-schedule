@@ -109,10 +109,18 @@
     return result;
   }
 
+  function taskPriority(task) {
+    var value = task.priority;
+    if (value === undefined || value === null || value === '') return 1;
+    var number = Number(value);
+    return number === 0 || number === 1 || number === 2 ? number : 1;
+  }
+
   /**
    * Fixed appointments are placed first and are never moved. The first appointment
    * wins a collision; later ones stay in waiting and receive an explicit conflict.
-   * Floating tasks fill the earliest gaps in input order. Completed tasks retain
+   * Floating tasks fill the earliest gaps by priority, preserving input order
+   * among equal priorities. Completed tasks retain
    * their slot so ticking a checkbox does not unexpectedly move the whole day.
    */
   function schedule(tasks, options) {
@@ -168,7 +176,9 @@
       placed.push({ task: entry.task, index: entry.index, start: requested, end: finish });
     });
 
-    floating.forEach(function (entry) {
+    floating.sort(function (a, b) {
+      return taskPriority(b.task) - taskPriority(a.task) || a.index - b.index;
+    }).forEach(function (entry) {
       placed.sort(function (a, b) { return a.start - b.start || a.index - b.index; });
       var cursor = start;
       var found = false;
