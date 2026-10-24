@@ -2,7 +2,7 @@
  * Firebase requests, AI downloads, auth callbacks and arbitrary URLs do not. */
 "use strict";
 
-const SHELL_VERSION = "2026-10-24-2";
+const SHELL_VERSION = "2026-10-24-3";
 const SCOPE_URL = new URL("./", self.registration.scope);
 const CACHE_PREFIX = "hvf-shell:" + SCOPE_URL.pathname + ":";
 const CACHE_NAME = CACHE_PREFIX + SHELL_VERSION;

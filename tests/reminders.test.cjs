@@ -386,3 +386,39 @@ test('an old active service worker cannot create a push subscription before the 
   await staleOwner.api.init();
   assert.equal(staleOwner.unsubscriptions, 1, 'account cleanup can always unsubscribe, even while an update is waiting');
 });
+
+test('plan validation errors keep the backend explanation when enabling instead of replacing it with a generic message', async () => {
+  const reason = 'Некорректная дата occurrenceDate.';
+  const page = client({ network: call => call.url.endsWith('/v1/plan') ? { ok: false, status: 400, json: async () => ({ error: reason, code: 'invalid_record' }) } : null });
+  await page.api.init();
+  await assert.rejects(page.api.enable(), failure => failure.message.includes(reason) && failure.message.includes('HTTP 400'));
+  assert.ok(page.api.getStatus().error.includes(reason));
+  assert.equal(page.api.getStatus().error.includes('Не удалось передать дела'), false);
+  assert.equal(page.api.getStatus().enabled, false);
+  assert.equal(page.devices().length, 0);
+  assert.equal(page.unsubscriptions, 1);
+});
+
+test('authentication errors identify the HTTP status and preserve the trusted backend reason', async () => {
+  for (const status of [401, 403]) {
+    const reason = 'Войди в Google ещё раз, чтобы подключить напоминания.';
+    const page = client({ network: call => call.url.endsWith('/v1/plan') ? { ok: false, status, json: async () => ({ error: reason, code: 'unauthorized' }) } : null });
+    await page.api.init();
+    await assert.rejects(page.api.enable(), failure => failure.message.includes('Сервис не подтвердил вход') && failure.message.includes('HTTP ' + status) && failure.message.includes(reason));
+    assert.ok(page.api.getStatus().error.includes('HTTP ' + status));
+    assert.equal(page.devices().length, 0);
+  }
+});
+
+test('malformed, oversized, or unknown backend error bodies fall back to a safe status message', async () => {
+  for (const body of [
+    { error: 'Do not show proxy details', code: 'unknown_proxy_error' },
+    { error: 'x'.repeat(501), code: 'invalid_record' },
+    { error: 'Injected\ncontrol', code: 'invalid_record' },
+    { error: { private: true }, code: 'invalid_record' },
+  ]) {
+    const page = client({ network: call => call.url.endsWith('/v1/plan') ? { ok: false, status: 400, json: async () => body } : null });
+    await page.api.init();
+    await assert.rejects(page.api.enable(), /Сервис напоминаний временно недоступен \(HTTP 400\)/);
+  }
+});

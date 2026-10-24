@@ -119,7 +119,9 @@ test('Firebase verification rejects forged, expired and wrong-project ID tokens'
   const signing = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
   const jwk = await crypto.subtle.exportKey('jwk', signing.publicKey); jwk.kid = 'test-google-key';
   let keyRequests = 0;
-  const verify = api.tokenVerifier(async url => {
+  const verify = api.tokenVerifier(async (url, options) => {
+    if (options.redirect === 'error') throw new TypeError('Workers supports only follow or manual redirects');
+    assert.equal(options.redirect, 'manual');
     assert.equal(url, api.GOOGLE_JWKS); keyRequests += 1;
     return Response.json({ keys: [jwk] }, { headers: { 'Cache-Control': 'public, max-age=3600' } });
   });
@@ -140,6 +142,25 @@ test('Firebase verification rejects forged, expired and wrong-project ID tokens'
   const forged = (await token()).split('.');
   forged[1] = Buffer.from(JSON.stringify({ sub: 'bob', aud: api.FIREBASE_PROJECT, iss: 'https://securetoken.google.com/' + api.FIREBASE_PROJECT, iat: start / 1000, auth_time: start / 1000, exp: start / 1000 + 3600 })).toString('base64url');
   await assert.rejects(() => verify(forged.join('.'), start), { status: 401 });
+});
+
+test('the default Google key fetch is bound to its runtime and never follows redirects', async () => {
+  const api = await backend, original = global.fetch;
+  let calls = 0;
+  global.fetch = function(url, options) {
+    assert.equal(this, globalThis, 'native runtime fetch needs its global receiver');
+    if (options.redirect === 'error') throw new TypeError('Unsupported redirect mode');
+    assert.equal(options.redirect, 'manual');
+    assert.equal(url, api.GOOGLE_JWKS);
+    calls++;
+    return Promise.resolve(new Response(null, { status: 302, headers: { Location: 'https://untrusted.example/keys' } }));
+  };
+  let verify;
+  try { verify = api.tokenVerifier(); } finally { global.fetch = original; }
+  const encoded = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const token = encoded({ alg: 'RS256', kid: 'test' }) + '.' + encoded({ sub: 'test', aud: api.FIREBASE_PROJECT, iss: 'https://securetoken.google.com/' + api.FIREBASE_PROJECT, iat: start / 1000 - 1, auth_time: start / 1000 - 1, exp: start / 1000 + 60 }) + '.AA';
+  await assert.rejects(() => verify(token, start), { status: 401 });
+  assert.equal(calls, 1, 'reject the redirect without attempting its target');
 });
 
 test('JSON size and type limits apply to streamed bodies, not only Content-Length', async () => {
@@ -399,6 +420,7 @@ test('the real WebCrypto package builds Apple-compatible encrypted VAPID request
   const originalFetch = global.fetch;
   let captured;
   global.fetch = async (endpoint, request) => {
+    if (request.redirect === 'error') throw new TypeError('Workers supports only follow or manual redirects');
     captured = { endpoint, request };
     return new Response(null, { status: 201 });
   };
@@ -410,7 +432,7 @@ test('the real WebCrypto package builds Apple-compatible encrypted VAPID request
     assert.match(headers.get('Authorization'), /^vapid t=/);
     assert.equal(headers.get('Content-Encoding'), 'aes128gcm');
     assert.equal(headers.get('TTL'), '60');
-    assert.equal(captured.request.redirect, 'error');
+    assert.equal(captured.request.redirect, 'manual');
     assert.equal(captured.request.body.byteLength, 4096);
     const ciphertext = Buffer.from(captured.request.body);
     assert.equal(ciphertext.includes(Buffer.from('Проверка')), false);

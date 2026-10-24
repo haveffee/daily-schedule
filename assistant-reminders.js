@@ -10,6 +10,7 @@
   const OWNER_KEY = "hvf-reminders-device-v1";
   const PUSH_WORKER_VERSION = "reminders-1";
   const ALLOWED_MINUTES = new Set([0, 5, 10, 15, 30, 60, 1440]);
+  const SERVICE_ERROR_CODES = new Set(["invalid_record", "invalid_plan", "fixed_time_required", "invalid_subscription", "too_many_reminders", "unauthorized", "json_required", "body_too_large", "invalid_json", "account_limit", "device_in_use", "device_limit", "test_rate_limit", "origin_not_allowed", "not_configured", "not_found", "device_not_found", "push_unavailable", "subscription_expired", "service_unavailable"]);
   const FIELDS = ["id", "kind", "month", "date", "title", "duration", "time", "priority", "done", "routineId", "occurrenceDate", "lastMovedAt", "updatedAt", "active", "weekdays", "startDate", "untilDate", "reminderMinutes"];
   const listeners = new Set();
   const cachedTokens = new Map();
@@ -85,9 +86,23 @@
       });
     } finally { if (timeout !== null) clearTimeout(timeout); }
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) throw new Error("Сервис не подтвердил вход. Войдите в Google заново и повторите попытку.");
-      if (response.status === 429) throw new Error("Слишком много запросов. Повторите попытку немного позже.");
-      throw new Error("Сервис напоминаний временно недоступен (" + response.status + "). Попробуйте ещё раз.");
+      let reason = "", code = "";
+      try {
+        const failure = await response.json();
+        if (failure && typeof failure === "object" && !Array.isArray(failure) && SERVICE_ERROR_CODES.has(failure.code) &&
+            typeof failure.error === "string" && failure.error.trim() && failure.error.length <= 500 && !/[\u0000-\u001f\u007f]/.test(failure.error)) {
+          reason = failure.error.trim(); code = failure.code;
+        }
+      } catch (_) {}
+      let detail;
+      if (response.status === 401 || response.status === 403) detail = "Сервис не подтвердил вход (HTTP " + response.status + "). " + (reason || "Войдите в Google заново и повторите попытку.");
+      else if (reason) detail = reason + " (HTTP " + response.status + ")";
+      else if (response.status === 429) detail = "Слишком много запросов (HTTP 429). Повторите попытку немного позже.";
+      else detail = "Сервис напоминаний временно недоступен (HTTP " + response.status + "). Попробуйте ещё раз.";
+      const failure = new Error(detail);
+      failure.status = response.status;
+      if (code) failure.code = code;
+      throw failure;
     }
     if (response.status === 204) return {};
     return response.json();
@@ -314,8 +329,9 @@
         if (!subscription) subscription = await worker.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
         actionCurrent(context, operation);
         activeSubscription = subscription;
-        if (!(await sync())) throw new Error("Не удалось передать дела сервису напоминаний. Попробуйте ещё раз.");
+        const synced = await sync();
         actionCurrent(context, operation);
+        if (!synced) throw new Error(planError || "Не удалось передать дела сервису напоминаний. Попробуйте ещё раз.");
         await request("/v1/devices", "POST", { subscription: subscription.toJSON() }, context);
         registered = true;
         actionCurrent(context, operation);

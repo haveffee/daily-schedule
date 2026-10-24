@@ -134,9 +134,10 @@ export function generateJobs(uid, revision, records, devices, now) {
 
 /** Google signs ID tokens. The worker only uses public verification keys; no
  * Firebase service-account credential is needed or accepted from the browser. */
-export function tokenVerifier(fetcher = fetch) {
+export function tokenVerifier(fetcher = globalThis.fetch.bind(globalThis)) {
   let cached = null, expires = 0;
   return async (token, now) => {
+    let stage = 'decode';
     try {
       if (typeof token !== 'string' || token.length > 12000) throw new Error('Invalid token');
       const parts = token.split('.');
@@ -144,13 +145,17 @@ export function tokenVerifier(fetcher = fetch) {
       const header = JSON.parse(new TextDecoder().decode(base64Bytes(parts[0])));
       const claims = JSON.parse(new TextDecoder().decode(base64Bytes(parts[1])));
       const seconds = Math.floor(now / 1000);
-      if (header.alg !== 'RS256' || typeof header.kid !== 'string' || !header.kid || header.kid.length > 150 ||
-          claims.aud !== FIREBASE_PROJECT || claims.iss !== 'https://securetoken.google.com/' + FIREBASE_PROJECT ||
-          typeof claims.sub !== 'string' || !claims.sub || claims.sub.length > 128 || /[\u0000-\u001f]/.test(claims.sub) ||
-          !Number.isFinite(claims.exp) || claims.exp <= seconds || !Number.isFinite(claims.iat) || claims.iat > seconds + 30 ||
-          !Number.isFinite(claims.auth_time) || claims.auth_time > seconds + 30) throw new Error('Invalid claims');
+      const invalid = [
+        ['alg', header.alg !== 'RS256'], ['kid', typeof header.kid !== 'string' || !header.kid || header.kid.length > 150],
+        ['aud', claims.aud !== FIREBASE_PROJECT], ['iss', claims.iss !== 'https://securetoken.google.com/' + FIREBASE_PROJECT],
+        ['sub', typeof claims.sub !== 'string' || !claims.sub || claims.sub.length > 128 || /[\u0000-\u001f]/.test(claims.sub)],
+        ['exp', !Number.isFinite(claims.exp) || claims.exp <= seconds], ['iat', !Number.isFinite(claims.iat) || claims.iat > seconds + 30],
+        ['auth_time', !Number.isFinite(claims.auth_time) || claims.auth_time > seconds + 30]
+      ].filter(([, failed]) => failed).map(([field]) => field);
+      if (invalid.length) throw new Error('Invalid claims:' + invalid.join(','));
       if (!cached || expires <= now) {
-        const response = await fetcher(GOOGLE_JWKS, { redirect: 'error' });
+        stage = 'fetch_keys';
+        const response = await fetcher(GOOGLE_JWKS, { redirect: 'manual' });
         if (!response.ok) throw new Error('Key service unavailable');
         const body = await response.json();
         if (!Array.isArray(body.keys) || body.keys.length > 20) throw new Error('Invalid key response');
@@ -160,11 +165,18 @@ export function tokenVerifier(fetcher = fetch) {
       }
       const jwk = cached.get(header.kid);
       if (!jwk) throw new Error('Unknown key');
+      stage = 'import_key';
       const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+      stage = 'verify_signature';
       const valid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, base64Bytes(parts[2]), encoder.encode(parts[0] + '.' + parts[1]));
       if (!valid) throw new Error('Invalid signature');
       return claims.sub;
-    } catch { fail(401, 'unauthorized', 'Войди в Google ещё раз, чтобы подключить напоминания.'); }
+    } catch (error) {
+      const known = ['Invalid token', 'Key service unavailable', 'Invalid key response', 'Unknown key', 'Invalid signature'];
+      const reason = known.includes(error?.message) || /^Invalid claims:[a-z_,]+$/.test(error?.message || '') ? error.message : error?.name || 'Error';
+      console.warn('HVF token verification failed', stage, reason);
+      fail(401, 'unauthorized', 'Войди в Google ещё раз, чтобы подключить напоминания.');
+    }
   };
 }
 
@@ -316,12 +328,12 @@ export async function sendWebPush(subscription, payload, env, ttl = 600) {
   const request = await buildPushPayload({ data: JSON.stringify(payload), options: { ttl, urgency: 'high' } }, subscription, {
     subject: env.VAPID_SUBJECT, publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY
   });
-  return fetch(subscription.endpoint, { ...request, redirect: 'error', signal: AbortSignal.timeout(10000) });
+  return fetch(subscription.endpoint, { ...request, redirect: 'manual', signal: AbortSignal.timeout(10000) });
 }
 
 export function createWorker(dependencies = {}) {
   const clock = dependencies.now || Date.now;
-  const verifyToken = dependencies.verifyToken || tokenVerifier(dependencies.fetch || fetch);
+  const verifyToken = dependencies.verifyToken || tokenVerifier(dependencies.fetch || globalThis.fetch.bind(globalThis));
   const send = dependencies.sendPush || sendWebPush;
   const repository = env => dependencies.repository || new Repository(env.DB);
   async function fetchHandler(request, env) {
@@ -388,7 +400,12 @@ export function createWorker(dependencies = {}) {
       if (!response.ok) fail(502, 'push_unavailable', 'Сервис уведомлений пока не принял проверку. Попробуй позже.');
       return respond({ ok: true, accepted: true });
     } catch (error) {
-      if (error instanceof ApiError) return respond({ error: error.message, code: error.code }, error.status);
+      if (error instanceof ApiError) {
+        // Categorical diagnostics only: never log tokens, endpoints or plan data.
+        console.warn('HVF reminder request rejected', error.status, error.code, error.message);
+        return respond({ error: error.message, code: error.code }, error.status);
+      }
+      console.error('HVF reminder service error', error && error.name || 'Error');
       return respond({ error: 'Сервис временно недоступен. Попробуй позже.', code: 'service_unavailable' }, 503);
     }
   }
