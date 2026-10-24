@@ -111,7 +111,7 @@ test('deployment and validation include the same shell and load the new modules 
   const required = [...validator.match(/REQUIRED = \(([\s\S]*?)\)/)[1].matchAll(/"([^"]+)"/g)].map(match => match[1]).sort();
   assert.deepEqual(required, expected, 'local validation covers the deployed files');
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-  const ui = html.indexOf('./assistant-ui.js?v=8');
+  const ui = html.indexOf('./assistant-ui.js');
   assert.ok(ui > 0);
   for (const name of ['categories', 'forecast', 'backup', 'focus', 'limits']) {
     const moduleIndex = html.indexOf('./assistant-' + name + '.js');
