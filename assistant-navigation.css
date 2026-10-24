@@ -1,0 +1,6 @@
+/* Explicit section changes animate; background synchronization keeps content still. */
+.workspace{overflow-x:clip}
+.hvf-route-enter{animation:hvf-route-slide .29s cubic-bezier(.22,.61,.36,1) both}
+@keyframes hvf-route-slide{from{opacity:.55;transform:translate3d(var(--hvf-route-offset,0px),4px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+@media(max-width:800px) and (pointer:coarse){.hvf-swipe-surface{touch-action:pan-y pinch-zoom}}
+@media(prefers-reduced-motion:reduce){.hvf-route-enter{animation:none!important}}

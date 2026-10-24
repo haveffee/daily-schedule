@@ -10,6 +10,7 @@ const weekly = require('../assistant-weekly.js');
 const categories = require('../assistant-categories.js');
 const forecast = require('../assistant-forecast.js');
 const backup = require('../assistant-backup.js');
+const navigation = require('../assistant-navigation.js');
 const limits = require('../assistant-limits.js');
 const focusModule = require('../assistant-focus.js');
 
@@ -50,17 +51,19 @@ function createUI(initial = [], options = {}) {
       id, innerHTML: '', textContent: '', hidden: false, value: '', open: false,
       disabled: false, dataset: {}, offsetWidth: 0,
       classList: {
-        add: name => classes.add(name), remove: name => classes.delete(name),
+        add: (...names) => names.forEach(name=>classes.add(name)), remove: (...names) => names.forEach(name=>classes.delete(name)),
         toggle(name, enabled) {
           const add = enabled === undefined ? !classes.has(name) : enabled;
           if (add) classes.add(name); else classes.delete(name);
           return add;
         }
       },
+      style:{setProperty(name,value){el[name]=value;},removeProperty(name){delete el[name];}},
       addEventListener(type, callback) {
         const callbacks = listeners.get(type) || [];
         callbacks.push(callback); listeners.set(type, callbacks);
       },
+      removeEventListener(type,callback){listeners.set(type,(listeners.get(type)||[]).filter(fn=>fn!==callback));},
       async fire(type, event = {}) {
         for (const callback of listeners.get(type) || []) {
           await callback({ target: el, preventDefault() {}, ...event });
@@ -98,6 +101,8 @@ function createUI(initial = [], options = {}) {
     HVFCore: core, HVFExtras: extras, HVFPlanner: planner, HVFWeekly: weekly, HVFStore: store,
     HVFPWA: options.pwa, HVFReminders: options.reminders,
     HVFCategories: categories, HVFForecast: forecast, HVFBackup: backup, HVFLimits: limits, HVFFocus: focus,
+    HVFNavigation:navigation, PointerEvent:function(){},innerWidth:options.mobile?390:1200,
+    matchMedia:query=>({matches:query.includes('reduced-motion')?!!options.reduced:!!options.mobile}),
     addEventListener(type, callback) { windowEvents.set(type, callback); },
     scrollTo() {}
   };
@@ -150,7 +155,7 @@ function createUI(initial = [], options = {}) {
       return error;
     },
     navigate(hash) { location.hash = hash; windowEvents.get('hashchange')(); },
-    windowEvent(type, event = {}) { windowEvents.get(type)?.(event); },
+    windowEvent(type, event = {}) {const before=location.hash;windowEvents.get(type)?.(event);if(location.hash!==before&&type!=='hashchange')windowEvents.get('hashchange')?.();},
     setMonth: value => node('monthPicker').fire('change', { target: { value } })
   };
 }
@@ -279,6 +284,57 @@ test('Qwen controls and generic goal generation are gone while saved steps survi
 
 test('day has a single task entry without the redundant quick form', () => {
   const ui=createUI();ui.navigate('#day');assert.doesNotMatch(ui.html(),/quickTaskForm|quickText|Быстро записать/);ui.click('add-task');assert.equal(ui.node('dialogTitle').textContent,'Новое дело');
+});
+
+test('ready categories and vector icons are available without creating user records or money', () => {
+  const ui=createUI();
+  for(const title of ['Продукты','Кафе','Транспорт','Одежда','Развлечения','Здоровье','Дом','Подписки'])assert.ok(ui.html().includes('<h3>'+title+'</h3>'),title);
+  assert.match(ui.html(),/data-category-icon="food"/);assert.match(ui.html(),/data-category-icon="shirt"/);
+  assert.equal(ui.writes.length,0);assert.equal(ui.records().length,0);assert.equal(statValue(ui,'Все поступления'),'0 BYN');
+  ui.click('add-expense');assert.match(ui.fields(),/value="category:category-default-food"/);
+});
+
+test('a ready category can be customized, archived and restored without reappearing as a duplicate', async () => {
+  const ui=createUI();ui.click('edit-category','category-default-clothing');
+  assert.equal(ui.node('dialogTitle').textContent,'Изменить категорию');assert.match(ui.fields(),/value="shirt" checked/);
+  await ui.submit({title:'Моя одежда',envelope:'essentials',icon:'tag'});
+  const [edited]=ui.records('expense-category');assert.equal(edited.id,'category-default-clothing');assert.equal(edited.icon,'tag');
+  assert.ok(!categories.list(ui.records()).some(c=>c.title==='Одежда'));
+  ui.click('archive-category',edited.id);await ui.submit({});
+  assert.equal(categories.list(ui.records()).some(c=>c.id===edited.id),false);
+  ui.upsert({id:'unrelated',kind:'income',month:MONTH,date:DAY,title:'Подарок',currency:'BYN',amount:10});
+  assert.equal(categories.list(ui.records()).some(c=>c.id===edited.id),false);
+  ui.click('restore-category',edited.id);assert.equal(categories.list(ui.records()).find(c=>c.id===edited.id).title,'Моя одежда');
+});
+
+test('preset expenses save their icon and keep legacy expenses unclassified', async () => {
+  const legacy={id:'legacy',kind:'expense',month:MONTH,date:DAY,title:'Раньше',amount:5,currency:'BYN',category:'flexible'};
+  const ui=createUI([legacy]);ui.click('add-expense');
+  await ui.submit({title:'Хлеб',amount:'2.5',date:DAY,currency:'BYN',category:'category:category-default-food'});
+  const food=ui.records('expense').find(r=>r.title==='Хлеб');assert.equal(food.expenseCategoryId,'category-default-food');assert.equal(food.expenseCategoryIcon,'food');assert.equal(food.category,'essentials');
+  assert.equal(ui.records('expense').find(r=>r.id==='legacy').expenseCategoryId,undefined);
+  ui.click('edit-category','category-default-food');await ui.submit({title:'Еда дома',envelope:'essentials',icon:'coffee'});
+  assert.equal(categories.classification(food,ui.records()).title,'Еда дома');assert.equal(ui.records('expense').find(r=>r.id===food.id).amount,2.5);
+});
+
+test('custom categories retain a selected icon and reject unsafe icon values', async () => {
+  const ui=createUI();ui.click('add-category');
+  await ui.submit({title:'Подарки',envelope:'flexible',icon:'film'});
+  const [custom]=ui.records('expense-category');assert.equal(custom.icon,'film');assert.equal(categories.list(ui.records()).length,9);
+  ui.click('edit-category',custom.id);await ui.submit({title:'Подарки',envelope:'flexible',icon:'<svg>'},/значок из списка/);
+  assert.equal(ui.records('expense-category')[0].icon,'film');
+});
+
+test('a deliberate touch swipe changes sections and a modal prevents it without data writes', async () => {
+  const ui=createUI([],{mobile:true});ui.navigate('#day');
+  const swipe=async(time)=>{
+    await ui.node('content').fire('pointerdown',{pointerType:'touch',pointerId:1,isPrimary:true,button:0,clientX:250,clientY:300,timeStamp:time});
+    ui.windowEvent('pointermove',{pointerId:1,clientX:120,clientY:304,timeStamp:time+120});
+    ui.windowEvent('pointerup',{pointerId:1,clientX:100,clientY:305,timeStamp:time+180});
+  };
+  await swipe(1000);assert.match(ui.html(),/Твои большие/);assert.equal(ui.writes.length,0);
+  ui.navigate('#day');ui.click('add-task');const fields=ui.fields();await swipe(3000);
+  assert.match(ui.html(),/День в твоём ритме/);assert.equal(ui.fields(),fields);assert.equal(ui.node('editor').open,true);
 });
 
 test('first-run wizard reviews three steps and saves linked data only at the end', async () => {

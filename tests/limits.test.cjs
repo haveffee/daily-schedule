@@ -14,9 +14,19 @@ function flexible(records, settings = options) { return summarize(records, setti
 
 test('empty ledgers offer all four limits without allocating or protecting money', () => {
   const rows = summarize([], options);
-  assert.deepEqual(rows.map(row => row.category), ['essentials', 'reserve', 'goals', 'flexible']);
+  assert.deepEqual(rows.slice(0,4).map(row => row.category), ['essentials', 'reserve', 'goals', 'flexible']);
+  assert.equal(rows.length,12);
+  assert.equal(rows.filter(row=>row.category.startsWith('category-default-')).length,8);
   assert.ok(rows.every(row => !row.configured && row.amount === 0 && row.spent === 0 && row.remaining === null && row.status === 'ok'));
   assert.equal(rows[0].id, 'limit-2026-10-BYN-essentials');
+});
+
+test('a ready category and its envelope count an explicitly categorized expense without relabeling legacy expenses', () => {
+  const id='category-default-food';
+  const rows=summarize([limit(id,20),expense(7,{expenseCategoryId:id,category:'essentials'}),expense(3,{category:'food'})],options);
+  assert.equal(rows.find(row=>row.category===id).spent,7);
+  assert.equal(rows.find(row=>row.category==='essentials').spent,10);
+  assert.equal(rows.find(row=>row.category===id).title,'Продукты');
 });
 
 test('decimal expenses reach the limit exactly, including 0.1 plus 0.2', () => {
@@ -137,7 +147,7 @@ test('summaries and alerts do not mutate persisted records or previous snapshots
 test('invalid context fails clearly and non-array record input stays empty', () => {
   assert.throws(() => summarize([], { month: '2026-13', currency: 'BYN' }), /месяц/);
   assert.throws(() => summarize([], { month, currency: 'EUR' }), /валюту/);
-  assert.equal(summarize(null, options).length, 4);
+  assert.equal(summarize(null, options).length, 12);
   assert.deepEqual(crossing(null, null), []);
 });
 
@@ -226,7 +236,7 @@ test('unsafe custom identifiers and malformed category metadata never create hid
     expense(10, { expenseCategoryId: '__proto__', category: 'flexible' }),
     expense(20, { expenseCategoryId: 'category-../path', category: 'essentials' }),
     limit('category-../path', 100), limit('category-inactive', 0)], options);
-  assert.equal(rows.length, 4);
+  assert.equal(rows.length, 12);
   assert.equal(rows.find(row => row.category === 'flexible').spent, 10);
   assert.equal(rows.find(row => row.category === 'essentials').spent, 20);
 });

@@ -201,17 +201,32 @@ test('category backup validation matches active and archived category semantics'
     if (archived === undefined) delete record.archived;
     const result = parsed([record]);
     assert.equal(result.ok, true, String(archived));
-    assert.equal(categories.list(result.records, { includeArchived: true }).length, 1);
-    assert.equal(categories.list(result.records).length, archived === true ? 0 : 1);
+    assert.equal(categories.list(result.records, { includeArchived: true, includePresets: false }).length, 1);
+    assert.equal(categories.list(result.records, { includePresets: false }).length, archived === true ? 0 : 1);
   }
   for (const changes of [
     { archived: 'false' }, { archived: null }, { archived: 0 }, { envelope: 'unknown' }, { envelope: [] },
-    { id: 'cafes' }, { id: 'category-' }, { month: '2026-10' }, { title: 'я'.repeat(49) }, { title: [] }
+    { id: 'cafes' }, { id: 'category-' }, { month: '2026-10' }, { title: 'я'.repeat(49) }, { title: [] },
+    { icon: null }, { icon: [] }, { icon: 'a'.repeat(65) }
   ]) {
     const result = parsed([{ ...category, ...changes }]);
     assert.equal(result.ok, false, JSON.stringify(changes));
     assert.deepEqual(backup.importPlan([], result).records, [], JSON.stringify(changes));
   }
+});
+
+test('preset customizations and icon choices survive backup without making suggestions into saved data', () => {
+  const categories = require('../assistant-categories.js');
+  const original = { ...categories.findById('category-default-food', []), title: 'Магазины', icon: 'home', archived: true };
+  const result = backup.importPlan([], envelope([original]));
+  assert.equal(result.ok, true);
+  assert.equal(result.records.length, 1);
+  assert.deepEqual(result.records[0], original);
+  assert.equal(categories.list(result.records).some(row => row.id === original.id), false);
+  assert.equal(categories.findById(original.id, result.records).icon, 'home');
+  assert.equal(categories.list(result.records, { includeArchived: true }).find(row => row.id === original.id).title, 'Магазины');
+  assert.equal(parsed([{ ...original, icon: 'future-icon' }]).ok, true);
+  assert.equal(categories.iconKey(parsed([{ ...original, icon: 'future-icon' }]).records[0]), 'tag');
 });
 
 test('income plan requires its global id, currency and civil date while preserving overdue plans', () => {

@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parent
 REQUIRED = (
     "index.html",
     "assistant.css",
+    "assistant-navigation.css",
     "assistant-finance.css",
     "assistant-planner.css",
     "assistant-reminders.css",
@@ -20,6 +21,7 @@ REQUIRED = (
     "assistant-update.css",
     "assistant-sales.css",
     "assistant-ui.js",
+    "assistant-navigation.js",
     "assistant-core.js",
     "assistant-forecast.js",
     "assistant-categories.js",

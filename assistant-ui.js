@@ -3,6 +3,14 @@
   const $ = (id) => document.getElementById(id);
   const core = window.HVFCore, store = window.HVFStore, categories = window.HVFCategories, forecast = window.HVFForecast, backup = window.HVFBackup, focus = window.HVFFocus, limits = window.HVFLimits, planner = window.HVFPlanner, weekly = window.HVFWeekly, reminders = window.HVFReminders;
   const paths = {
+    food:'M3 8h18l-2 12H5L3 8Zm4 0 3-5m7 5-3-5M9 12v4m6-4v4',
+    coffee:'M3 8h13v8a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5V8Zm13 1h2a3 3 0 1 1 0 6h-2M6 3v2m4-2v2m4-2v2',
+    transport:'M5 17h14M5 17l-1-6 2-7h12l2 7-1 6M4 11h16M7 17v3m10-3v3M7 14h.1m9.9 0h.1',
+    shirt:'m8 3-6 4 3 5 3-2v11h8V10l3 2 3-5-6-4a4 4 0 0 1-8 0Z',
+    film:'M3 4h18v16H3V4Zm5 0v16m8-16v16M3 9h5m-5 6h5m8-6h5m-5 6h5',
+    health:'M9 3h6v6h6v6h-6v6H9v-6H3V9h6V3Z',
+    repeat:'M20 7V3l-4 4h4a8 8 0 0 0-14 1M4 17v4l4-4H4a8 8 0 0 0 14-1',
+    tag:'M3 3h8l10 10-8 8L3 11V3Zm4 4h.1',
     home:'M3 10 12 3l9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z',
     calendar:'M5 5h14a2 2 0 0 1 2 2v13H3V7a2 2 0 0 1 2-2ZM7 3v4m10-4v4M3 10h18m-13 4h2m4 0h2m-8 3h2',
     target:'M21 12a9 9 0 1 1-9-9m5 0v4h4m-9 5 7-7M16 12a4 4 0 1 1-4-4',
@@ -20,6 +28,9 @@
   const nowDate = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Minsk',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   const reminderRouteDate = () => /^#day\/(\d{4}-\d{2}-\d{2})$/.exec(location.hash)?.[1]||'';
   let day = planner.validDate(reminderRouteDate())?reminderRouteDate():nowDate(), month = day.slice(0,7), state = store.getState(), view = 'overview', lastRenderedView = '', submitEditor = null, busy = false, onboarding = null, restoreContext = null, editorLabel = 'Сохранить', toastTimer, undoAction, importantOnly = false, movePreview = null, completionFlash = null, pendingReminderDate = '';
+  const navigation=window.HVFNavigation?.create({root:$('content'),window,document,getRoute:()=>view,navigate:route=>{location.hash=route;},isBlocked:()=>busy||$('editor').open});
+  const categoryIconNames={food:'Продукты',coffee:'Кафе',transport:'Транспорт',shirt:'Одежда',film:'Развлечения',health:'Здоровье',home:'Дом',repeat:'Подписки',tag:'Другое'};
+  const categorySymbol=category=>'<span class="category-symbol" data-category-icon="'+categories.iconKey(category)+'">'+icon(categories.iconKey(category))+'</span>';
   const fmtDate = (date, options={day:'numeric',month:'long'}) => new Intl.DateTimeFormat('ru-RU',{...options,timeZone:'Europe/Minsk'}).format(new Date(date+'T12:00:00+03:00'));
   const monthLabel = () => fmtDate(month+'-01',{month:'long',year:'numeric'}).replace(' г.','');
   const currencies = {BYN:'Белорусский рубль',USD:'Доллар США',RUB:'Российский рубль'};
@@ -224,7 +235,7 @@
     if(!items.length)return empty('wallet',kind==='income'?'Подарки и подработки — тоже доход':'Пока без расходов',kind==='income'?'Поступления добавляются к зарплате и увеличивают бюджет.':'Записывай траты, чтобы видеть точный свободный остаток.',button(kind==='income'?'+ Добавить поступление':'+ Записать расход',kind==='income'?'add-income':'add-expense','small secondary'));
     return items.map(item=>{
       const category=kind==='income'?'Дополнительный доход':item.expenseCategoryId?categories.classification(item,allRecords()).title:item.commitmentId?(getRecord(item.commitmentId)?.title||item.commitmentTitle||'Обязательная сумма (архив)'):item.category==='goal'?(getRecord(item.goalId)?.title||'Цель (архив)'):envelopeNames[item.category]||'Свободные деньги';
-      return '<article class="expense-row"><span class="expense-icon '+(kind==='income'?'income-icon':'')+'">'+icon(kind==='income'?'plus':'wallet')+'</span><div><h3>'+esc(item.title)+'</h3><p>'+fmtDate(item.date)+(item.date>nowDate()?' · Запланировано':'')+' · '+esc(category)+'</p></div><strong class="'+(kind==='income'?'income-amount':'')+'">'+(kind==='income'?'+':'−')+money(item.amount)+'</strong>'+actions(kind,item.id)+'</article>';
+      return '<article class="expense-row"><span class="expense-icon '+(kind==='income'?'income-icon':'')+'">'+icon(kind==='income'?'plus':item.expenseCategoryId?categories.iconKey(categories.findById(item.expenseCategoryId,allRecords())||{icon:item.expenseCategoryIcon}):'wallet')+'</span><div><h3>'+esc(item.title)+'</h3><p>'+fmtDate(item.date)+(item.date>nowDate()?' · Запланировано':'')+' · '+esc(category)+'</p></div><strong class="'+(kind==='income'?'income-amount':'')+'">'+(kind==='income'?'+':'−')+money(item.amount)+'</strong>'+actions(kind,item.id)+'</article>';
     }).join('');
   }
   function commitmentPanel(b) {
@@ -238,20 +249,22 @@
   }
   function categoryPanel() {
     const list=categories.list(allRecords(),{includeArchived:true}),active=list.filter(c=>!c.archived),archived=list.filter(c=>c.archived),summaries=new Map(limits.summarize(allRecords(),{month,currency:selectedCurrency()}).map(r=>[r.category,r]));
-    const row=c=>{const spent=summaries.get(c.id)?.spent||0;return '<article class="category-row"><div><h3>'+esc(c.title)+'</h3><p>'+esc(envelopeNames[c.envelope])+' · '+money(spent)+' за '+esc(monthLabel())+'</p></div><div class="category-actions">'+button(c.archived?'Вернуть':'Изменить',c.archived?'restore-category':'edit-category','small secondary',c.id)+(!c.archived?button('В архив','archive-category','small secondary',c.id):'')+'</div></article>';};
-    return '<section class="panel"><div class="panel-head"><h2>Категории расходов</h2>'+button('+ Категория','add-category','small secondary')+'</div><p class="status-note planner-hint">Свои названия для повседневных трат: например, еда, транспорт или досуг. Каждая категория относится к одной части бюджета.</p>'+(active.length?active.map(row).join(''):'<p class="status-note">Добавь первую категорию. Её можно будет выбрать при записи расхода и задать для неё лимит.</p>')+(archived.length?'<details class="category-archive"><summary>Архив · '+archived.length+'</summary>'+archived.map(row).join('')+'</details>':'')+'</section>';
+    const row=c=>{const spent=summaries.get(c.id)?.spent||0;return '<article class="category-card">'+categorySymbol(c)+'<div class="category-card-copy"><h3>'+esc(c.title)+'</h3><p>'+esc(envelopeNames[c.envelope])+'</p><strong>'+money(spent)+'</strong></div><div class="category-card-action">'+button(c.archived?'Вернуть':'Настроить',c.archived?'restore-category':'edit-category','small secondary',c.id)+'</div></article>';};
+    return '<section class="panel"><div class="panel-head"><h2>Категории расходов</h2>'+button('+ Своя категория','add-category','small secondary')+'</div><p class="status-note planner-hint">Готовые категории уже доступны при записи расхода. Меняй названия и значки, добавляй свои. Суммы ниже — записанные расходы за '+esc(monthLabel())+'.</p><div class="category-grid">'+active.map(row).join('')+'</div>'+(archived.length?'<details class="category-archive"><summary>Архив · '+archived.length+'</summary><div class="category-grid">'+archived.map(row).join('')+'</div></details>':'')+'</section>';
   }
   function categoryEditor(id) {
-    const old=getRecord(id)||{},isNew=!old.id;
-    openEditor(isNew?'Новая категория':'Изменить категорию',field('Название','title','text',old.title||'','required maxlength="48" placeholder="Например, продукты"')+selectField('Из какой части бюджета тратить','envelope',Object.entries(envelopeNames),old.envelope||'flexible')+'<p class="status-note">Название обновится в истории. Изменение части бюджета применяется к новым расходам; прежние суммы остаются на своих местах.</p>',async data=>{
-      const record=categories.validateCategory({...old,id:old.id||'category-'+uid(),kind:'expense-category',month:'2000-03',title:String(data.get('title')||''),envelope:String(data.get('envelope')||''),archived:false,createdAt:old.createdAt||Date.now()},allRecords());
+    const old=categories.findById(id,allRecords())||{},isNew=!old.id,chosenIcon=categories.iconKey(old);
+    const iconPicker='<fieldset class="category-icon-picker"><legend>Значок</legend><div>'+categories.ICONS.map(key=>'<label><input type="radio" name="icon" value="'+key+'" '+(key===chosenIcon?'checked':'')+'>'+categorySymbol({icon:key})+'<span>'+categoryIconNames[key]+'</span></label>').join('')+'</div></fieldset>';
+    openEditor(isNew?'Новая категория':'Изменить категорию',field('Название','title','text',old.title||'','required maxlength="48" placeholder="Например, продукты"')+iconPicker+selectField('Из какой части бюджета тратить','envelope',Object.entries(envelopeNames),old.envelope||'flexible')+'<p class="status-note">Название обновится в истории. Изменение части бюджета применяется к новым расходам; прежние суммы остаются на своих местах.</p>'+(!isNew?'<div class="category-editor-archive">'+button('Убрать в архив','archive-category','small secondary',old.id)+'<p class="status-note">История сохранится. Категорию можно вернуть позже.</p></div>':''),async data=>{
+      const selectedIcon=String(data.get('icon')||chosenIcon);if(!categories.ICONS.includes(selectedIcon))throw new Error('Выбери значок из списка.');
+      const record=categories.validateCategory({...old,id:old.id||'category-'+uid(),kind:'expense-category',month:'2000-03',title:String(data.get('title')||''),icon:selectedIcon,envelope:String(data.get('envelope')||''),archived:false,createdAt:old.createdAt||Date.now()},allRecords());
       store.put(record);toast('Категория сохранена. Теперь она доступна в редакторе расхода.');
     });
   }
   function archiveCategory(id,archived) {
-    const record=getRecord(id);if(!record)return;
+    const record=categories.findById(id,allRecords());if(!record)return;
     if(!archived){try{store.put(categories.validateCategory({...record,archived:false},allRecords()));toast('Категория снова доступна для новых расходов.');}catch(e){toast(e.message);}return;}
-    openEditor('Убрать категорию в архив?', '<p class="preview-intro">'+esc(record.title)+' не будет предлагаться для новых расходов. История и лимиты сохранятся. Категорию можно вернуть из архива.</p>',async()=>{store.put({...getRecord(id),archived:true});toast('Категория в архиве. Записанные траты сохранены.');});setEditorLabel('В архив');
+    openEditor('Убрать категорию в архив?', '<p class="preview-intro">'+esc(record.title)+' не будет предлагаться для новых расходов. История и лимиты сохранятся. Категорию можно вернуть из архива.</p>',async()=>{const latest=categories.findById(id,allRecords());if(!latest)throw new Error('Категория уже недоступна.');store.put({...latest,archived:true});toast('Категория в архиве. Записанные траты сохранены.');});setEditorLabel('В архив');
   }
   function forecastPanel() {
     const currency=selectedCurrency(),f=forecast.summarize(allRecords(),{today:nowDate(),currency}),ready=f.status==='ready'||f.status==='shortfall';
@@ -267,8 +280,9 @@
     });
   }
   function limitsPanel() {
-    const rows=limits.summarize(allRecords(),{month,currency:selectedCurrency()});
-    return '<section class="panel">'+panelHead('Лимиты расходов')+'<p class="status-note planner-hint">Месячные границы для частей бюджета и твоих категорий. Общий лимит части включает расходы её категорий; это не дополнительные траты. Учитываются записанные расходы в '+selectedCurrency()+', включая будущие даты. Лимит предупреждает, а обязательные суммы по-прежнему откладываются отдельно.</p><div class="limits-list">'+rows.map(r=>'<article class="limit-card '+r.status+'"><div class="limit-top"><h3>'+esc(r.title)+'</h3>'+(r.configured?'<span class="tag">'+Math.round(r.percent)+'%</span>':'')+'</div><div class="limit-track"><div class="limit-fill" style="width:'+Math.min(100,r.percent)+'%"></div></div><div class="limit-amounts"><strong>'+money(r.spent)+'</strong><span>'+(r.configured?'из '+money(r.amount):'Лимит не задан')+'</span></div>'+(r.configured?'<p class="limit-alert '+r.status+'">'+(r.status==='exceeded'?(r.remaining<0?'Превышение на '+money(-r.remaining):'Лимит израсходован'):r.status==='near'?'Приближаешься к лимиту. Осталось '+money(r.remaining):'Можно потратить ещё '+money(r.remaining))+'</p>':'')+'<div class="limit-controls">'+button(r.configured?'Изменить':'Задать лимит','edit-limit','small secondary',r.id)+(r.configured?button('Убрать','delete','small secondary',r.id):'')+'</div></article>').join('')+'</div></section>';
+    const rows=limits.summarize(allRecords(),{month,currency:selectedCurrency()}),configured=rows.filter(r=>r.configured),available=rows.filter(r=>!r.configured&&!r.archived);
+    const row=r=>'<article class="limit-card '+r.status+'"><div class="limit-top"><h3>'+esc(r.title)+'</h3>'+(r.configured?'<span class="tag">'+Math.round(r.percent)+'%</span>':'')+'</div><div class="limit-track"><div class="limit-fill" style="width:'+Math.min(100,r.percent)+'%"></div></div><div class="limit-amounts"><strong>'+money(r.spent)+'</strong><span>'+(r.configured?'из '+money(r.amount):'Лимит не задан')+'</span></div>'+(r.configured?'<p class="limit-alert '+r.status+'">'+(r.status==='exceeded'?(r.remaining<0?'Превышение на '+money(-r.remaining):'Лимит израсходован'):r.status==='near'?'Приближаешься к лимиту. Осталось '+money(r.remaining):'Можно потратить ещё '+money(r.remaining))+'</p>':'')+'<div class="limit-controls">'+button(r.configured?'Изменить':'Задать лимит','edit-limit','small secondary',r.id)+(r.configured?button('Убрать','delete','small secondary',r.id):'')+'</div></article>';
+    return '<section class="panel">'+panelHead('Лимиты расходов')+'<p class="status-note planner-hint">Задай месячную границу для нужной категории или части бюджета. Общий лимит части включает её категории. Учитываются записанные расходы в '+selectedCurrency()+', включая будущие даты.</p>'+(configured.length?'<div class="limits-list">'+configured.map(row).join('')+'</div>':'<p class="status-note">Лимиты пока не заданы. Выбери категорию ниже, чтобы получать предупреждения о тратах.</p>')+(available.length?'<details class="limits-more"><summary>Задать '+(configured.length?'ещё один ':'')+'лимит</summary><div class="limits-list">'+available.map(row).join('')+'</div></details>':'')+'</section>';
   }
   function limitEditor(id) {
     const row=limits.summarize(allRecords(),{month,currency:selectedCurrency()}).find(r=>r.id===id);if(!row)return;
@@ -312,7 +326,7 @@
     $('monthPicker').value=month;
     $('content').innerHTML=view==='overview'?onboardingPanel()+focusMini()+overview()+weekTeaser():view==='day'?head('День в твоём ритме.',fmtDate(day,{weekday:'long',day:'numeric',month:'long'})+' · меняй дела, остальное пересчитается.',button(icon('plus')+' Добавить дело','add-task'))+onboardingPanel()+focusMini()+'<div class="stack">'+dayPanel()+routinePanel()+'</div>':view==='focus'?focusView():view==='week'?weeklyView():view==='goals'?goalsView():view==='money'?moneyView():settingsView();
     if(view==='settings'){$('installationPanel').innerHTML=installationContent();$('remindersPanel').innerHTML=remindersContent();}
-    if(lastRenderedView!==view){lastRenderedView=view;$('content').classList.remove('view-enter');void $('content').offsetWidth;$('content').classList.add('view-enter');}
+    if(lastRenderedView!==view){const previous=lastRenderedView;lastRenderedView=view;navigation?.enter($('content'),previous,view);}
     $('syncShort').textContent={local:'На этом устройстве',synced:'Всё синхронизировано',offline:'Сохранено на устройстве',loading:'Подключение…',syncing:'Синхронизирую…',error:'Проверь синхронизацию'}[state.status]||'Сохраняю…';
     $('syncDetail').textContent=syncText();$('syncDot').className=state.status==='synced'?'online':state.status==='error'||state.status==='offline'?'warning':'';
     $('accountButton').textContent=state.user?'Выйти из аккаунта':'Войти через Google';$('accountEmail').textContent=state.user?.email||'';
@@ -463,12 +477,12 @@
         if(!id)continue;const linked=getRecord(id);
         if(linked?(linked.kind!==kind||linked.month!==targetMonth||recordCurrency(linked)!==currency):!(e.id&&id===original&&e.month===targetMonth&&recordCurrency(e)===currency))throw new Error('Выбери пункт из того же месяца и в той же валюте.');
       }
-      const categoryId=category.startsWith('category:')?category.slice(9):'',custom=categoryId?categories.list(allRecords(),{includeArchived:true}).find(c=>c.id===categoryId):null;
+      const categoryId=category.startsWith('category:')?category.slice(9):'',custom=categoryId?categories.findById(categoryId,allRecords()):null;
       if(categoryId&&(!custom||custom.archived)&&!(e.id&&e.expenseCategoryId===categoryId))throw new Error('Категория больше недоступна. Выбери другую.');
       if(!expenseCategories(currency,date,e).some(([value])=>value===category))throw new Error('Выбери существующую категорию расхода.');
       const sameCustom=!!categoryId&&e.expenseCategoryId===categoryId;
       const categoryEnvelope=categoryId?(sameCustom?categories.classification(e,allRecords()).envelope:custom.envelope):category;
-      const record={...e,id:e.id&&e.month===targetMonth?e.id:uid(),kind:'expense',month:targetMonth,currency,date,title,amount:readAmount(data,'amount'),category:commitmentId?'essentials':goalId?'goal':categoryEnvelope,expenseCategoryId:categoryId,expenseCategoryTitle:categoryId?(custom?.title||e.expenseCategoryTitle||'Категория из архива'):'',goalId,commitmentId,commitmentTitle:commitmentId?(getRecord(commitmentId)?.title||e.commitmentTitle||''):'',createdAt:e.createdAt||Date.now()};
+      const record={...e,id:e.id&&e.month===targetMonth?e.id:uid(),kind:'expense',month:targetMonth,currency,date,title,amount:readAmount(data,'amount'),category:commitmentId?'essentials':goalId?'goal':categoryEnvelope,expenseCategoryId:categoryId,expenseCategoryTitle:categoryId?(custom?.title||e.expenseCategoryTitle||'Категория из архива'):'',expenseCategoryIcon:categoryId?categories.iconKey(custom||{icon:e.expenseCategoryIcon}):'',goalId,commitmentId,commitmentTitle:commitmentId?(getRecord(commitmentId)?.title||e.commitmentTitle||''):'',createdAt:e.createdAt||Date.now()};
       const before=limits.summarize(allRecords(),{month:targetMonth,currency});
       store.put(record);if(e.id&&e.id!==record.id)store.remove(e.id);if(targetMonth!==month){day=date;month=targetMonth;store.setPeriod(month,day);}setCurrency(currency);const warnings=limits.crossing(before,limits.summarize(allRecords(),{month:targetMonth,currency}));toast(warnings.length?'Расход записан. '+warnings.map(r=>r.title+': '+(r.status==='exceeded'?'лимит израсходован':'достигнуто '+Math.round(r.percent)+'% лимита')).join('. ')+'.':'Расход записан. Остатки обновлены.');
     });
@@ -588,5 +602,6 @@
   if(reminders)void reminders.init().catch(e=>toast(e.message||'Сервис напоминаний временно недоступен.'));
   focus.setScope(state.user?.uid||null);focus.init();
   focus.subscribe((f,event)=>{if(event.type==='tick'){const face=$('focusTime'),mini=$('focusMiniTime');if(face)face.textContent=focusClock(f.remainingMs);if(mini)mini.textContent=focusClock(f.remainingMs);return;}if(event.type==='finished')toast(f.mode==='break'?'Перерыв закончился. Можно выбрать следующее дело.':'Время фокуса вышло. Отметь результат в списке дел.');if(view==='focus'||view==='overview'||view==='day')render();});
+  navigation?.init();
   store.setPeriod(month,day);render();void store.init();
 }());

@@ -145,6 +145,7 @@
       if (typeof record.title === 'string' && record.title.trim().replace(/\s+/g, ' ').length > 48) fail('category-title', 'Название категории должно содержать не больше 48 символов.');
       if (['essentials', 'reserve', 'goals', 'flexible'].indexOf(record.envelope) < 0) fail('category-envelope', 'У категории должна быть существующая часть бюджета.');
       if (record.archived !== undefined && typeof record.archived !== 'boolean') fail('category-archived', 'Состояние архива категории должно быть true или false.');
+      if (record.icon !== undefined && (typeof record.icon !== 'string' || record.icon.length > 64)) fail('category-icon', 'Значок категории должен быть строкой длиной не больше 64 символов.');
     }
     if (record.kind === 'income-plan') {
       if (['BYN', 'USD', 'RUB'].indexOf(record.currency) < 0 || record.id !== 'income-plan-' + record.currency) fail('income-plan-id', 'Id плана поступления должен соответствовать его валюте.');
