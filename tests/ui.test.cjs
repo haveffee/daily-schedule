@@ -11,6 +11,7 @@ const categories = require('../assistant-categories.js');
 const forecast = require('../assistant-forecast.js');
 const backup = require('../assistant-backup.js');
 const navigation = require('../assistant-navigation.js');
+const motion = require('../assistant-motion.js');
 const limits = require('../assistant-limits.js');
 const focusModule = require('../assistant-focus.js');
 
@@ -36,6 +37,15 @@ function createUI(initial = [], options = {}) {
   const writes = [];
   const downloads = [];
   const blobs = new Map();
+  const contentWrites = [];
+  const scrolls = [];
+  const addListener = (registry,type,callback) => {
+    const handlers=registry.get(type)||[];handlers.push(callback);registry.set(type,handlers);
+  };
+  const removeListener = (registry,type,callback) => registry.set(type,(registry.get(type)||[]).filter(handler=>handler!==callback));
+  const emit = (registry,type,event={}) => {
+    for(const handler of [...registry.get(type)||[]])handler(event);
+  };
   let timerNow = Date.parse(DAY+'T09:00:00Z');
   let timerTick = () => {};
   const timerData = new Map();
@@ -48,10 +58,11 @@ function createUI(initial = [], options = {}) {
     const listeners = new Map();
     const classes = new Set();
     const el = {
-      id, innerHTML: '', textContent: '', hidden: false, value: '', open: false,
+      id, innerHTML: '', innerHTMLWrites:0, textContent: '', hidden: false, value: '', open: false,
       disabled: false, dataset: {}, offsetWidth: 0,
       classList: {
         add: (...names) => names.forEach(name=>classes.add(name)), remove: (...names) => names.forEach(name=>classes.delete(name)),
+        contains: name => classes.has(name),
         toggle(name, enabled) {
           const add = enabled === undefined ? !classes.has(name) : enabled;
           if (add) classes.add(name); else classes.delete(name);
@@ -74,6 +85,10 @@ function createUI(initial = [], options = {}) {
       showModal() { el.open = true; },
       close() { el.open = false; }
     };
+    let html='';
+    Object.defineProperty(el,'innerHTML',{
+      get(){return html;},set(value){html=String(value);el.innerHTMLWrites++;if(id==='content')contentWrites.push(html);}
+    });
     nodes.set(id, el);
     return el;
   }
@@ -101,15 +116,18 @@ function createUI(initial = [], options = {}) {
     HVFCore: core, HVFExtras: extras, HVFPlanner: planner, HVFWeekly: weekly, HVFStore: store,
     HVFPWA: options.pwa, HVFReminders: options.reminders,
     HVFCategories: categories, HVFForecast: forecast, HVFBackup: backup, HVFLimits: limits, HVFFocus: focus,
-    HVFNavigation:navigation, PointerEvent:function(){},innerWidth:options.mobile?390:1200,
+    HVFNavigation:options.navigation||navigation, HVFMotion:motion, PointerEvent:function(){},innerWidth:options.mobile?390:1200,
     matchMedia:query=>({matches:query.includes('reduced-motion')?!!options.reduced:!!options.mobile}),
-    addEventListener(type, callback) { windowEvents.set(type, callback); },
-    scrollTo() {}
+    addEventListener(type, callback) { addListener(windowEvents,type,callback); },
+    removeEventListener(type,callback){removeListener(windowEvents,type,callback);},
+    scrollTo(value) {scrolls.push(clone(value));this.scrollY=value.top;},scrollY:0
   };
   const document = {
     getElementById: node, querySelectorAll: () => [],
     createElement:()=>({click(){downloads.push({name:this.download,blob:blobs.get(this.href)});}}),
-    addEventListener(type, callback) { documentEvents.set(type, callback); }
+    addEventListener(type, callback) { addListener(documentEvents,type,callback); },
+    removeEventListener(type,callback){removeListener(documentEvents,type,callback);},
+    documentElement:node('documentElement'),visibilityState:'visible'
   };
   class FixedDate extends Date {
     constructor(...args) { super(...(args.length ? args : [DAY + 'T09:00:00Z'])); }
@@ -127,20 +145,25 @@ function createUI(initial = [], options = {}) {
   }, { filename: 'assistant-ui.js' });
 
   return {
-    node, periods, writes, focus, downloads,
+    node, periods, writes, focus, downloads,contentWrites,scrolls,
+    contentWriteCount:()=>contentWrites.length,
+    scrollTop:()=>window.scrollY,
+    scrollTo(value){window.scrollY=value;},
     elapse(ms) {timerNow+=ms;timerTick();return focus.getState();},
-    form(id,values) {documentEvents.get('submit')({target:{id,values},preventDefault(){}});},
+    form(id,values) {emit(documentEvents,'submit',{target:{id,values},preventDefault(){}});},
     records: kind => Object.values(clone(current.records)).filter(record => !kind || record.kind === kind),
     html: () => normalize(node('content').innerHTML),
     fields: () => normalize(node('dialogFields').innerHTML),
     click(action, id) {
       const target = { dataset: { action, id }, disabled: false };
       const previousHash = location.hash;
-      documentEvents.get('click')({ target: { closest: () => target } });
-      if (location.hash !== previousHash) windowEvents.get('hashchange')?.();
+      emit(documentEvents,'click',{ target: { closest: () => target },preventDefault(){} });
+      if (location.hash !== previousHash) emit(windowEvents,'hashchange');
     },
-    change(dataset, checked, extra = {}) { documentEvents.get('change')({ target: { dataset, checked, ...extra } }); },
+    change(dataset, checked, extra = {}) { emit(documentEvents,'change',{ target: { dataset, checked, ...extra } }); },
     upsert(record) { current.records[record.id] = clone(record); publish(); },
+    status(status,error=''){current={...current,status,error};publish();},
+    publish(){publish();},
     account(uid, records = []) {
       current = { ...current, user: uid ? { uid, email: uid + '@example.test' } : null,
         records: Object.fromEntries(records.map(record => [record.id, clone(record)])) };
@@ -154,8 +177,8 @@ function createUI(initial = [], options = {}) {
       else assert.equal(error, '', 'the application must accept the entered values');
       return error;
     },
-    navigate(hash) { location.hash = hash; windowEvents.get('hashchange')(); },
-    windowEvent(type, event = {}) {const before=location.hash;windowEvents.get(type)?.(event);if(location.hash!==before&&type!=='hashchange')windowEvents.get('hashchange')?.();},
+    navigate(hash) { location.hash = hash; emit(windowEvents,'hashchange'); },
+    windowEvent(type, event = {}) {const before=location.hash;emit(windowEvents,type,event);if(location.hash!==before&&type!=='hashchange')emit(windowEvents,'hashchange');},
     setMonth: value => node('monthPicker').fire('change', { target: { value } })
   };
 }
@@ -1068,4 +1091,162 @@ test('weekly route combines task progress and separate currency totals within th
   ui.click('report-day', '2026-10-22');
   assert.match(ui.html(), /День в твоём ритме/);
   assert.ok(taskMarkup(ui, 'pending'));
+});
+
+test('cloud acknowledgements update sync chrome without replacing a scrolling day', () => {
+  const task=dayTask('stable',{title:'Сохранённое дело'}),ui=createUI([task]);
+  ui.account('alice',[task]);ui.navigate('#day');ui.scrollTo(740);
+  const before=ui.contentWriteCount(),html=ui.html(),scrollCalls=ui.scrolls.length;
+  ui.status('syncing');
+  assert.equal(ui.node('syncShort').textContent,'Синхронизирую…');
+  ui.status('synced');ui.publish();
+  assert.equal(ui.node('syncShort').textContent,'Всё синхронизировано');
+  assert.equal(ui.node('syncBadge').classList.contains('cloud-online'),true);
+  assert.equal(ui.contentWriteCount(),before);
+  assert.equal(ui.html(),html);
+  assert.equal(ui.scrollTop(),740);
+  assert.equal(ui.scrolls.length,scrollCalls);
+});
+
+test('settings status updates preserve the rhythm form, editor and scroll while refreshing account chrome', () => {
+  const ui=createUI();ui.account('alice');ui.navigate('#settings');
+  ui.node('rhythmForm').values={start:'11:15',end:'23:00',breakMinutes:'12'};
+  ui.scrollTo(515);ui.click('add-task');
+  const before=ui.contentWriteCount(),fields=ui.fields(),settings=ui.html();
+  ui.status('loading');
+  assert.equal(ui.node('accountButton').disabled,true);
+  assert.equal(ui.node('backupFile').disabled,true);
+  assert.match(ui.node('settingsAccountPanel').innerHTML,/Подключаю данные аккаунта/);
+  ui.status('offline');
+  assert.equal(ui.node('backupFile').disabled,false);
+  assert.equal(ui.node('accountButton').disabled,false);
+  assert.match(ui.node('settingsAccountPanel').innerHTML,/ожидают отправки/);
+  ui.status('error','Проверка соединения');
+  assert.equal(ui.node('syncDetail').textContent,'Проверка соединения');
+  assert.match(ui.node('settingsAccountPanel').innerHTML,/Проверка соединения/);
+  assert.equal(ui.contentWriteCount(),before);
+  assert.equal(ui.html(),settings);
+  assert.equal(ui.node('rhythmForm').values.start,'11:15');
+  assert.equal(ui.fields(),fields);
+  assert.equal(ui.node('editor').open,true);
+  assert.equal(ui.scrollTop(),515);
+});
+
+test('fresh clones with identical record values keep content stable but changed records and routes render', () => {
+  const task=dayTask('same-value',{title:'Первоначальный текст'}),ui=createUI([task]);
+  ui.navigate('#day');
+  const before=ui.contentWriteCount();
+  ui.upsert(clone(task));ui.publish();
+  assert.equal(ui.contentWriteCount(),before,'referential changes alone are not visual changes');
+  ui.upsert({...task,title:'Изменено на телефоне'});
+  assert.equal(ui.contentWriteCount(),before+1);
+  assert.match(ui.html(),/Изменено на телефоне/);
+  assert.doesNotMatch(ui.html(),/Первоначальный текст/);
+  ui.navigate('#goals');assert.equal(ui.contentWriteCount(),before+2);
+  ui.navigate('#day');assert.equal(ui.contentWriteCount(),before+3);
+  ui.navigate('#day');assert.equal(ui.contentWriteCount(),before+3,'the same route must not replay a transition');
+});
+
+test('saving one task renders its store change once despite the explicit render after submit', async () => {
+  const ui=createUI();ui.navigate('#day');ui.click('add-task');
+  const before=ui.contentWriteCount();
+  await ui.submit(taskFields({title:'Одна запись — одно обновление'}));
+  assert.equal(ui.contentWriteCount(),before+1);
+  assert.equal(ui.node('editor').open,false);
+  assert.equal(ui.records('task').length,1);
+  assert.match(ui.html(),/Одна запись — одно обновление/);
+  ui.status('syncing');ui.status('synced');
+  assert.equal(ui.contentWriteCount(),before+1,'the server acknowledgement must not rebuild the freshly saved page');
+});
+
+test('focus ticks update only the clock while pause and resume update controls once', async () => {
+  const ui=createUI([dayTask('focused',{title:'Тихая работа'})]);
+  ui.click('focus-task','focused');await ui.submit({minutes:'25'});
+  const before=ui.contentWriteCount();
+  ui.elapse(1000);ui.elapse(1000);
+  assert.equal(ui.node('focusTime').textContent,'24:58');
+  assert.equal(ui.contentWriteCount(),before);
+  ui.click('focus-pause');
+  assert.equal(ui.contentWriteCount(),before+1);
+  assert.match(ui.html(),/data-action="focus-resume"/);
+  ui.elapse(60000);assert.equal(ui.contentWriteCount(),before+1);
+  ui.click('focus-resume');
+  assert.equal(ui.contentWriteCount(),before+2);
+  assert.match(ui.html(),/data-action="focus-pause"/);
+  assert.equal(ui.records('task')[0].done,false);
+});
+
+test('new account payload replaces old content immediately and closes an old editor through motion', () => {
+  const alice=dayTask('private-alice',{title:'Личное дело Алисы'}),bob=dayTask('private-bob',{title:'Дело Боба'});
+  const calls=[],ui=createUI([alice],{navigation:navigationSpy(calls)});ui.account('alice',[alice]);ui.navigate('#day');ui.click('edit-task',alice.id);
+  assert.equal(ui.node('editor').open,true);
+  const before=ui.contentWriteCount();calls.length=0;
+  ui.account('bob',[bob]);
+  assert.equal(ui.node('editor').open,false);
+  assert.equal(ui.node('editor').classList.contains('hvf-dialog-exiting'),false);
+  assert.equal(ui.contentWriteCount(),before+1);
+  assert.match(ui.html(),/Дело Боба/);
+  assert.doesNotMatch(ui.html(),/Личное дело Алисы/);
+  assert.equal(ui.node('accountEmail').textContent,'bob@example.test');
+  assertScene(calls,before,'','day',null);
+  assert.match(ui.node('toastText').textContent,/Аккаунт изменился/);
+  assert.equal(ui.writes.length,0);
+});
+
+function navigationSpy(calls) {
+  return {create({root,document}){
+    const capture=(phase,from,to,settings)=>calls.push({phase,from,to,settings:settings?clone(settings):null,
+      writes:root.innerHTMLWrites,html:root.innerHTML,
+      installation:document.getElementById('installationPanel').innerHTML,
+      reminders:document.getElementById('remindersPanel').innerHTML});
+    return {init(){},settle(){},cancel(){},prepare(content,from,to,settings){assert.equal(content,root);capture('prepare',from,to,settings);},
+      enter(content,from,to,settings){assert.equal(content,root);capture('enter',from,to,settings);}};
+  }};
+}
+
+function assertScene(calls,before,from,to,settings) {
+  assert.deepEqual(calls.map(call=>call.phase),['prepare','enter']);
+  assert.equal(calls[0].writes,before,'old scene is captured before HTML replacement');
+  assert.equal(calls[1].writes,before+1,'new scene starts after one content replacement');
+  for(const call of calls){assert.equal(call.from,from);assert.equal(call.to,to);assert.deepEqual(call.settings,settings);}
+}
+
+test('day, week and month changes prepare before mutation and enter afterward with their direction', async () => {
+  const calls=[],ui=createUI([],{navigation:navigationSpy(calls)});
+  ui.navigate('#day');
+  for(const [action,direction] of [['next-day',1],['prev-day',-1]]){
+    calls.length=0;const before=ui.contentWriteCount();ui.click(action);
+    assertScene(calls,before,'day','day',{refresh:true,direction});
+  }
+  ui.navigate('#week');
+  for(const [action,direction] of [['prev-week',-1],['next-week',1]]){
+    calls.length=0;const before=ui.contentWriteCount();ui.click(action);
+    assertScene(calls,before,'week','week',{refresh:true,direction});
+  }
+  calls.length=0;const before=ui.contentWriteCount();await ui.setMonth('2026-11');
+  assertScene(calls,before,'week','week',{refresh:true,direction:1});
+});
+
+test('currency and important filters animate explicit refreshes while status and data sync do not start scenes', () => {
+  const calls=[],task=dayTask('keep',{priority:2}),ui=createUI([task],{navigation:navigationSpy(calls)});
+  calls.length=0;let before=ui.contentWriteCount();ui.click('currency','USD');
+  assertScene(calls,before,'money','money',{refresh:true,direction:0});
+  calls.length=0;ui.status('syncing');ui.status('synced');ui.publish();
+  assert.deepEqual(calls,[]);
+  ui.upsert({...task,title:'Пришло с телефона'});
+  assert.deepEqual(calls,[],'synced data refresh changes content without a page animation');
+  ui.navigate('#day');calls.length=0;before=ui.contentWriteCount();ui.click('important-only');
+  assertScene(calls,before,'day','day',{refresh:true,direction:0});
+  calls.length=0;ui.status('offline');ui.status('synced');
+  assert.deepEqual(calls,[]);
+});
+
+test('ordinary route transitions omit refresh flags and finish secondary settings panels before entry', () => {
+  const calls=[],ui=createUI([],{navigation:navigationSpy(calls)});
+  calls.length=0;const before=ui.contentWriteCount();ui.navigate('#settings');
+  assertScene(calls,before,'money','settings',null);
+  assert.match(calls[0].html,/Деньги с намерением/);
+  assert.match(calls[1].html,/Под твой ритм/);
+  assert.match(calls[1].installation,/Приложение на телефоне и компьютере/);
+  assert.match(calls[1].reminders,/Напоминания на этом устройстве/);
 });

@@ -85,7 +85,7 @@ test('installation precaches a complete public shell under the project path only
   const sw = worker();
   await sw.lifecycle('install');
   const urls = sw.requests.map(request => request.url);
-  assert.equal(urls.length, 31);
+  assert.equal(urls.length, 33);
   for (const request of sw.requests) {
     assert.ok(request.url.startsWith(SCOPE));
     assert.equal(request.cache, 'reload');
@@ -113,13 +113,15 @@ test('deployment and validation include the same shell and load the new modules 
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   const ui = html.indexOf('./assistant-ui.js');
   assert.ok(ui > 0);
-  for (const name of ['categories', 'forecast', 'backup', 'focus', 'limits', 'navigation']) {
+  for (const name of ['categories', 'forecast', 'backup', 'focus', 'limits', 'navigation', 'motion']) {
     const moduleIndex = html.indexOf('./assistant-' + name + '.js');
     assert.ok(moduleIndex > 0 && moduleIndex < ui, name + ' module loads before UI');
     assert.match(workflow, new RegExp('for file in [^\\n]*assistant-' + name + '\\.js'));
   }
   assert.ok(html.indexOf('./assistant-core.js') < html.indexOf('./assistant-forecast.js'), 'forecast uses the already loaded budget core');
   assert.ok(html.indexOf('./assistant-categories.js') < html.indexOf('./assistant-limits.js'), 'custom category limits load their classifier first');
+  const stylesheets = [...html.matchAll(/<link\b[^>]*rel="stylesheet"[^>]*href="([^"?]+)(?:\?[^\"]*)?"/g)].map(match => match[1]);
+  assert.equal(stylesheets.at(-1), './assistant-motion.css', 'shared motion rules follow the established component styles');
   for (const source of [html, workerSource, workflow, validator]) assert.doesNotMatch(source, /assistant-(?:ai|quick)\.js/);
 });
 

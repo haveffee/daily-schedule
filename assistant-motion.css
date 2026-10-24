@@ -1,0 +1,45 @@
+/* One quiet rhythm for controls; moving pages are owned by navigation. */
+:root{--motion-soft:cubic-bezier(.22,1,.36,1);--motion-quick:cubic-bezier(.2,.8,.2,1)}
+.button,.icon-button,.text-link,.date-arrows button,.filter-chip,.currency-tab,.backup-file-label,.focus-presets button,.focus-mini,.week-day,.report-task,.nav a,.mobile-nav a,summary{
+  transition:scale .32s var(--motion-soft),transform .32s var(--motion-soft),background-color .24s var(--motion-quick),border-color .24s var(--motion-quick),color .24s var(--motion-quick),box-shadow .28s var(--motion-soft),opacity .2s ease,filter .24s ease;
+  transform-origin:center;-webkit-tap-highlight-color:transparent
+}
+.hvf-motion-ready :is(.button,.icon-button,.date-arrows button):active:not(:disabled){transform:none}
+.hvf-motion-ready .hvf-pressed{scale:.972;transition-duration:.085s,.085s,.14s,.14s,.14s,.14s,.14s,.14s}
+.hvf-motion-ready :is(.icon-button,.date-arrows button,.nav a,.mobile-nav a).hvf-pressed{scale:.94}
+.hvf-motion-ready :is(input[type=checkbox],input[type=radio]){transition:scale .25s var(--motion-soft),opacity .2s ease}
+.hvf-motion-ready :is(input[type=checkbox],input[type=radio]).hvf-pressed{scale:.89}
+.weekday-picker span,.move-selection label,.category-icon-picker label,.restore-choice,.setup-progress li{
+  transition:background-color .24s var(--motion-quick),border-color .24s var(--motion-quick),color .24s var(--motion-quick),box-shadow .28s var(--motion-soft)
+}
+.category-icon-picker .category-symbol{transition:scale .32s var(--motion-soft),background-color .24s ease,color .24s ease}
+.category-icon-picker label:has(input:checked) .category-symbol{scale:1.08}
+.switch span{transition:background-color .26s var(--motion-quick)}
+.switch span::after{transition:transform .34s var(--motion-soft),box-shadow .24s ease}
+.switch input:checked+span::after{box-shadow:0 1px 4px #17392f20}
+.field input,.field select,.field textarea,.day-tools input,.month-picker input,.inline-form input,.focus-task-choice select,.focus-task-choice input{
+  transition:border-color .23s var(--motion-quick),box-shadow .28s var(--motion-soft),background-color .23s ease
+}
+.progress-fill,.budget-bar span{transition:width .65s var(--motion-soft),background-color .28s ease}
+.week-column i{transition:height .55s var(--motion-soft)}
+.task-row{transition:opacity .28s ease,background-color .3s ease}
+.task-copy h3{transition:color .28s ease}
+.hvf-motion-ready dialog.hvf-dialog-motion[open]{animation:none}
+.hvf-motion-ready dialog.hvf-dialog-motion[open] #dialogFields>:is(.field,.field-row,.weekday-field){animation:none}
+.hvf-motion-ready dialog.hvf-dialog-motion[open]::backdrop{animation:hvf-soft-backdrop .34s var(--motion-soft) both;transition:background-color .17s ease}
+.hvf-motion-ready dialog.hvf-dialog-exiting[open]::backdrop{animation:none;background-color:#182d2700}
+.toast:not([hidden]){animation:hvf-soft-toast .38s var(--motion-soft) both}
+summary{border-radius:7px;touch-action:manipulation}
+@keyframes hvf-soft-backdrop{from{opacity:0}to{opacity:1}}
+@keyframes hvf-soft-toast{from{opacity:0;transform:translateX(-50%) translateY(13px) scale(.98)}to{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}}
+@media(hover:hover) and (pointer:fine){
+  .button:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 5px 16px #244c4014}
+  .button.secondary:hover:not(:disabled){border-color:#c2cfb9}
+  .icon-button:hover{transform:translateY(-1px)}
+  .category-icon-picker label:hover{border-color:#b1c19f;background:#f6f8f0}
+}
+@media(prefers-reduced-motion:reduce){
+  .hvf-motion-ready .hvf-pressed,.category-icon-picker label:has(input:checked) .category-symbol{scale:1!important}
+  .toast:not([hidden]),.hvf-motion-ready dialog.hvf-dialog-motion[open]::backdrop{animation:none!important}
+  .button,.icon-button,.text-link,.date-arrows button,.filter-chip,.currency-tab,.backup-file-label,.focus-presets button,.focus-mini,.week-day,.report-task,.nav a,.mobile-nav a,summary,.switch span,.switch span::after,.task-row,.category-icon-picker .category-symbol,.progress-fill,.week-column i{transition:none!important}
+}

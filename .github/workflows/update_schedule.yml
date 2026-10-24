@@ -40,7 +40,7 @@ jobs:
 
       - name: Check JavaScript and regression tests
         run: |
-          for file in assistant-core.js assistant-forecast.js assistant-categories.js assistant-backup.js assistant-planner.js assistant-weekly.js assistant-navigation.js assistant-ui.js assistant-focus.js assistant-limits.js assistant-store.js assistant-extras.js assistant-reminders.js reminders-config.js pwa.js service-worker.js backend/reminders/worker.mjs backend/reminders/scripts/generate-vapid.mjs; do
+          for file in assistant-core.js assistant-forecast.js assistant-categories.js assistant-backup.js assistant-planner.js assistant-weekly.js assistant-navigation.js assistant-motion.js assistant-ui.js assistant-focus.js assistant-limits.js assistant-store.js assistant-extras.js assistant-reminders.js reminders-config.js pwa.js service-worker.js backend/reminders/worker.mjs backend/reminders/scripts/generate-vapid.mjs; do
             node --check "$file"
           done
           node --test tests/*.test.cjs
@@ -54,7 +54,7 @@ jobs:
       - name: Prepare public application files
         run: |
           mkdir -p _site
-          cp index.html assistant.css assistant-navigation.css assistant-finance.css assistant-planner.css assistant-reminders.css assistant-focus.css assistant-limits.css assistant-update.css assistant-sales.css assistant-core.js assistant-forecast.js assistant-categories.js assistant-backup.js assistant-planner.js assistant-weekly.js assistant-navigation.js assistant-ui.js assistant-focus.js assistant-limits.js assistant-store.js assistant-extras.js assistant-reminders.js reminders-config.js pwa.js service-worker.js firebase-config.js favicon.svg apple-touch-icon.png icon-192.png icon-512.png manifest.webmanifest _site/
+          cp index.html assistant.css assistant-navigation.css assistant-finance.css assistant-planner.css assistant-reminders.css assistant-focus.css assistant-limits.css assistant-update.css assistant-sales.css assistant-motion.css assistant-core.js assistant-forecast.js assistant-categories.js assistant-backup.js assistant-planner.js assistant-weekly.js assistant-navigation.js assistant-motion.js assistant-ui.js assistant-focus.js assistant-limits.js assistant-store.js assistant-extras.js assistant-reminders.js reminders-config.js pwa.js service-worker.js firebase-config.js favicon.svg apple-touch-icon.png icon-192.png icon-512.png manifest.webmanifest _site/
           cp .nojekyll _site/
 
       - name: Upload site artifact

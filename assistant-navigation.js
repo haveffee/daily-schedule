@@ -11,6 +11,8 @@
   const EDGE = 24;
   const MAX_DURATION = 1000;
   const REPEAT_DELAY = 450;
+  const EASING = 'cubic-bezier(.22,1,.36,1)';
+  const DURATION = 460;
 
   function route(value) {
     return String(value || '').replace(/^#\/?/, '').split(/[/?]/)[0];
@@ -22,7 +24,6 @@
     return ROUTES[index + direction] || null;
   }
 
-  // Deliberate horizontal movement is required; time alone cannot turn a tap into a swipe.
   function gesture(start, end) {
     if (!start || !end) return 0;
     const numbers = [start.x, start.y, start.time, end.x, end.y, end.time];
@@ -34,6 +35,14 @@
     return dx < 0 ? 1 : -1;
   }
 
+  // The page follows the finger directly, then gently resists a very long drag.
+  function displacement(dx, hasNeighbor) {
+    if (!Number.isFinite(dx)) return 0;
+    const distance = Math.abs(dx);
+    const amount = hasNeighbor ? (distance <= 96 ? distance : 96 + 84 * (1 - Math.exp(-(distance - 96) / 126))) : 22 * (1 - Math.exp(-distance / 80));
+    return Math.sign(dx) * amount;
+  }
+
   function create(options) {
     options = options || {};
     const surface = options.root;
@@ -42,8 +51,14 @@
     const getRoute = typeof options.getRoute === 'function' ? options.getRoute : () => win && win.location && win.location.hash;
     const navigate = typeof options.navigate === 'function' ? options.navigate : function () {};
     const listeners = [];
-    const animations = new Map();
     let active = null;
+    let pending = null;
+    let prepared = null;
+    let scene = null;
+    let returnMotion = null;
+    let frame = null;
+    let dragOffset = 0;
+    let scheduledOffset = 0;
     let initialized = false;
     let lastNavigationAt = -Infinity;
 
@@ -51,9 +66,13 @@
       return !!(win && typeof win.matchMedia === 'function' && win.matchMedia(query).matches);
     }
 
-    function mobile() {
-      return media('(max-width: 800px)') && media('(pointer: coarse)');
-    }
+    function reduced() { return media('(prefers-reduced-motion: reduce)'); }
+    function mobile() { return media('(max-width: 800px)') && media('(pointer: coarse)'); }
+    function later(callback, ms) { return win && typeof win.setTimeout === 'function' ? win.setTimeout(callback, ms) : null; }
+    function clearLater(id) { if (id !== null && win && typeof win.clearTimeout === 'function') win.clearTimeout(id); }
+    function translate(value) { return 'translate3d(' + value.toFixed(2) + 'px,0,0)'; }
+    function style(node, name, value) { if (node && node.style) node.style.setProperty(name, value); }
+    function unstyle(node, name) { if (node && node.style) node.style.removeProperty(name); }
 
     function blocked() {
       if (!mobile() || (options.isBlocked && options.isBlocked())) return true;
@@ -84,47 +103,157 @@
       return win && win.performance ? win.performance.now() : Date.now();
     }
 
-    function point(event, contact) {
-      return { x: contact.clientX, y: contact.clientY, time: timestamp(event) };
+    function point(event, contact) { return { x: contact.clientX, y: contact.clientY, time: timestamp(event) }; }
+
+    function cancelFrame() {
+      if (frame !== null && win && typeof win.cancelAnimationFrame === 'function') win.cancelAnimationFrame(frame);
+      frame = null;
+    }
+
+    function paintDrag(offset) {
+      dragOffset = reduced() ? 0 : offset;
+      style(surface, 'transform', translate(dragOffset));
+    }
+
+    function queueDrag(offset) {
+      scheduledOffset = offset;
+      if (frame !== null) return;
+      if (!win || typeof win.requestAnimationFrame !== 'function') return paintDrag(offset);
+      frame = win.requestAnimationFrame(() => { frame = null; paintDrag(scheduledOffset); });
+    }
+
+    function resetDrag() {
+      cancelFrame();
+      dragOffset = scheduledOffset = 0;
+      if (surface && surface.classList) surface.classList.remove('hvf-is-dragging');
+      unstyle(surface, 'transform');
+    }
+
+    // Each motion has one cleanup path, including interrupted transitions and suspended tabs.
+    function motion(node, frames, duration, cssClass, finish) {
+      let animation = null;
+      let timer = null;
+      let done = false;
+      const end = event => { if (!event || event.target === node) complete(); };
+      const cleanup = () => {
+        if (done) return;
+        done = true;
+        clearLater(timer);
+        node.removeEventListener('animationend', end);
+        node.classList.remove(cssClass);
+        if (animation) { animation.onfinish = null; animation.cancel(); }
+      };
+      const complete = () => { if (done) return; cleanup(); finish(); };
+      if (typeof node.animate === 'function') {
+        animation = node.animate(frames, { duration, easing: EASING, fill: 'both' });
+        animation.onfinish = complete;
+      } else {
+        node.addEventListener('animationend', end);
+        node.classList.add(cssClass);
+      }
+      timer = later(complete, duration + 100);
+      return cleanup;
+    }
+
+    function discardPrepared() {
+      if (prepared && prepared.snapshot && typeof prepared.snapshot.remove === 'function') prepared.snapshot.remove();
+      prepared = null;
+    }
+
+    function finishScene() {
+      const current = scene;
+      scene = null;
+      if (current) {
+        current.cleanups.forEach(clear => clear());
+        if (current.snapshot && typeof current.snapshot.remove === 'function') current.snapshot.remove();
+        current.content.classList.remove('hvf-route-enter');
+        ['transform', 'opacity', '--hvf-route-start', '--hvf-route-duration', '--hvf-route-opacity'].forEach(name => unstyle(current.content, name));
+      }
+    }
+
+    function clearReturn() {
+      if (returnMotion) returnMotion();
+      returnMotion = null;
+      if (surface && surface.classList) surface.classList.remove('hvf-route-return');
+      unstyle(surface, '--hvf-drag-start');
+    }
+
+    function clearPending() {
+      if (pending) clearLater(pending.timer);
+      pending = null;
+    }
+
+    function settle() {
+      if (returnMotion && !active && !pending) return;
+      active = null;
+      clearPending();
+      cancelFrame();
+      clearReturn();
+      const offset = dragOffset;
+      if (!surface || !surface.classList || !offset || reduced()) return resetDrag();
+      surface.classList.remove('hvf-is-dragging');
+      style(surface, '--hvf-drag-start', offset.toFixed(2) + 'px');
+      returnMotion = motion(surface, [{ transform: translate(offset) }, { transform: translate(0) }], 360, 'hvf-route-return', () => { returnMotion = null; resetDrag(); unstyle(surface, '--hvf-drag-start'); });
+    }
+
+    function cancel() {
+      active = null;
+      clearPending();
+      clearReturn();
+      finishScene();
+      discardPrepared();
+      resetDrag();
     }
 
     function begin(event, contact, id) {
-      active = null;
+      if (active || pending) settle();
       if (blocked() || ignored(event.target)) return;
       const from = route(getRoute());
       if (!ROUTES.includes(from)) return;
       const width = Number(win.innerWidth) || (doc && doc.documentElement && doc.documentElement.clientWidth) || 0;
       const start = point(event, contact);
       if (!width || start.x <= EDGE || start.x >= width - EDGE || start.time - lastNavigationAt < REPEAT_DELAY) return;
-      active = { ...start, id, from };
+      clearReturn();
+      finishScene();
+      resetDrag();
+      active = { ...start, id, from, locked: false };
     }
+
+    function offsetFor(from, dx) { return displacement(dx, !!neighbor(from, dx < 0 ? 1 : -1)); }
 
     function move(event, contact) {
       if (!active) return;
       const next = point(event, contact);
-      const dx = Math.abs(next.x - active.x);
-      const dy = Math.abs(next.y - active.y);
-      // Once scrolling vertically, the same finger must not later switch a section.
-      if (blocked() || next.time - active.time > MAX_DURATION || (dy > 16 && dy > dx * 0.8)) active = null;
+      const dx = next.x - active.x;
+      const dy = next.y - active.y;
+      if (blocked() || next.time - active.time > MAX_DURATION || (!active.locked && Math.abs(dy) > 16 && Math.abs(dy) > Math.abs(dx) * 0.8)) return settle();
+      if (!active.locked && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+        active.locked = true;
+        surface.classList.remove('view-enter');
+        surface.classList.add('hvf-is-dragging');
+      }
+      if (active.locked) queueDrag(offsetFor(active.from, dx));
     }
 
     function finish(event, contact) {
       const start = active;
-      active = null;
-      if (!start || blocked() || route(getRoute()) !== start.from) return;
+      if (!start || blocked() || route(getRoute()) !== start.from) return settle();
       const end = point(event, contact);
       const direction = gesture(start, end);
       const next = neighbor(start.from, direction);
-      if (!next || end.time - lastNavigationAt < REPEAT_DELAY) return;
+      if (!next || end.time - lastNavigationAt < REPEAT_DELAY) return settle();
+      active = null;
+      cancelFrame();
+      paintDrag(offsetFor(start.from, end.x - start.x));
       lastNavigationAt = end.time;
-      navigate(next);
+      pending = { from: start.from, to: next, offset: dragOffset, timer: null };
+      pending.timer = later(() => { if (pending) settle(); }, 650);
+      // Keep the last finger position until the synchronous render captures it.
+      try { navigate(next); } catch (error) { settle(); throw error; }
     }
-
-    function cancel() { active = null; }
 
     function updateSurfaceRoute(value) {
       if (!surface || !surface.classList) return;
-      // Auxiliary views can contain native horizontal charts, so do not restrict their panning.
       surface.classList[ROUTES.includes(route(value)) ? 'add' : 'remove']('hvf-swipe-surface');
     }
 
@@ -140,86 +269,171 @@
       if (win.PointerEvent) {
         listen(surface, 'pointerdown', event => {
           if (event.pointerType !== 'touch') return;
-          if (event.isPrimary === false || (event.button !== undefined && event.button !== 0)) return cancel();
+          if (event.isPrimary === false || (event.button !== undefined && event.button !== 0)) return settle();
           begin(event, event, event.pointerId);
         });
-        listen(win, 'pointerdown', event => {
-          if (event.pointerType === 'touch' && event.isPrimary === false) cancel();
-        });
-        listen(win, 'pointermove', event => {
-          if (active && event.pointerId === active.id) move(event, event);
-        });
-        listen(win, 'pointerup', event => {
-          if (active && event.pointerId === active.id) finish(event, event);
-        });
-        listen(win, 'pointercancel', cancel);
+        listen(win, 'pointerdown', event => { if (event.pointerType === 'touch' && event.isPrimary === false) settle(); });
+        listen(win, 'pointermove', event => { if (active && event.pointerId === active.id) move(event, event); });
+        listen(win, 'pointerup', event => { if (active && event.pointerId === active.id) finish(event, event); });
+        listen(win, 'pointercancel', settle);
       } else {
         listen(surface, 'touchstart', event => {
-          if (!event.touches || event.touches.length !== 1) return cancel();
+          if (!event.touches || event.touches.length !== 1) return settle();
           begin(event, event.touches[0], event.touches[0].identifier);
         });
-        listen(win, 'touchstart', event => {
-          if (!event.touches || event.touches.length !== 1) cancel();
-        });
+        listen(win, 'touchstart', event => { if (!event.touches || event.touches.length !== 1) settle(); });
         listen(win, 'touchmove', event => {
           if (!active) return;
-          if (!event.touches || event.touches.length !== 1) return cancel();
+          if (!event.touches || event.touches.length !== 1) return settle();
           const contact = event.touches[0];
           if (contact.identifier === active.id) move(event, contact);
-          else cancel();
+          else settle();
         });
         listen(win, 'touchend', event => {
           if (!active) return;
-          if (event.touches && event.touches.length) return cancel();
+          if (event.touches && event.touches.length) return settle();
           const contact = Array.from(event.changedTouches || []).find(item => item.identifier === active.id);
           if (contact) finish(event, contact);
-          else cancel();
+          else settle();
         });
-        listen(win, 'touchcancel', cancel);
+        listen(win, 'touchcancel', settle);
       }
       listen(win, 'blur', cancel);
       listen(win, 'resize', cancel);
       if (doc && typeof doc.addEventListener === 'function') listen(doc, 'visibilitychange', cancel);
     }
 
-    function enter(content, from, to) {
+    // The outgoing scene is transient and inert. Strip identifiers and action hooks so
+    // background form queries and delegated events can never treat it as live UI.
+    function snapshot(content, offset) {
+      if (!doc || !doc.body || typeof doc.createElement !== 'function' || typeof content.cloneNode !== 'function' || typeof content.getBoundingClientRect !== 'function') return null;
+      const rect = content.getBoundingClientRect();
+      let opacity = '1';
+      if (scene && scene.content === content && win && typeof win.getComputedStyle === 'function') {
+        const currentOpacity = Number.parseFloat(win.getComputedStyle(content).opacity);
+        if (Number.isFinite(currentOpacity)) opacity = String(Math.max(0, Math.min(1, currentOpacity)));
+      }
+      const height = Number(win.innerHeight) || (doc.documentElement && doc.documentElement.clientHeight) || 0;
+      const top = Math.max(0, rect.top);
+      if (!rect.width || !height || top >= height || rect.bottom <= 0) return null;
+      const wrapper = doc.createElement('div');
+      const copy = content.cloneNode(true);
+      wrapper.className = 'hvf-route-snapshot';
+      wrapper.setAttribute('aria-hidden', 'true');
+      wrapper.setAttribute('inert', '');
+      wrapper.inert = true;
+      const nodes = [copy, ...Array.from(copy.querySelectorAll('*'))];
+      nodes.forEach(node => {
+        Array.from(node.attributes || []).forEach(attribute => {
+          if (attribute.name === 'id' || attribute.name === 'name' || attribute.name === 'for' || attribute.name.startsWith('data-')) node.removeAttribute(attribute.name);
+        });
+        if ('disabled' in node) node.disabled = true;
+        if (typeof node.removeAttribute === 'function') node.removeAttribute('autofocus');
+      });
+      Array.from(copy.querySelectorAll('script,iframe,object,embed')).forEach(node => node.remove());
+      const liveControls = Array.from(content.querySelectorAll('input,textarea,select'));
+      Array.from(copy.querySelectorAll('input,textarea,select')).forEach((control, index) => {
+        const live = liveControls[index];
+        if (!live) return;
+        const type = String(live.type || (typeof live.getAttribute === 'function' && live.getAttribute('type')) || '').toLowerCase();
+        if (type === 'file' || type === 'password') {
+          control.value = '';
+          if (typeof control.removeAttribute === 'function') control.removeAttribute('value');
+          return;
+        }
+        control.value = live.value;
+        if ('checked' in control) control.checked = live.checked;
+      });
+      copy.classList.remove('view-enter', 'hvf-route-enter', 'hvf-is-dragging', 'hvf-css-enter', 'hvf-route-return');
+      style(wrapper, 'left', (rect.left - offset) + 'px');
+      style(wrapper, 'top', top + 'px');
+      style(wrapper, 'width', rect.width + 'px');
+      style(wrapper, 'height', Math.min(height - top, rect.bottom - top) + 'px');
+      style(wrapper, 'transform', translate(offset));
+      style(copy, 'position', 'absolute');
+      style(copy, 'top', (rect.top - top) + 'px');
+      style(copy, 'left', '0');
+      style(copy, 'margin', '0');
+      style(copy, 'width', '100%');
+      style(copy, 'max-width', 'none');
+      style(copy, 'transform', 'none');
+      style(copy, 'opacity', opacity);
+      wrapper.appendChild(copy);
+      doc.body.appendChild(wrapper);
+      return wrapper;
+    }
+
+    function prepare(content, from, to, intent) {
+      const previous = route(from);
+      const next = route(to);
+      const refresh = !!(intent && intent.refresh);
+      discardPrepared();
+      if (!content || !content.classList || !previous || (previous === next && !refresh)) return false;
+      const offset = refresh ? 0 : pending && pending.from === previous && pending.to === next ? pending.offset : dragOffset;
+      const image = reduced() ? null : snapshot(content, offset);
+      active = null;
+      clearPending();
+      clearReturn();
+      finishScene();
+      resetDrag();
+      prepared = { content, from: previous, to: next, offset, snapshot: image, refresh };
+      return !!image;
+    }
+
+    function enter(content, from, to, intent) {
       if (!content || !content.classList) return false;
       const previous = route(from);
       const next = route(to);
+      const refresh = !!(intent && intent.refresh);
       updateSurfaceRoute(next);
-      const cleanup = animations.get(content);
-      if (cleanup) cleanup();
+      if (!previous || (previous === next && !refresh)) return false;
+      const captured = prepared && prepared.content === content && prepared.from === previous && prepared.to === next && prepared.refresh === refresh ? prepared : null;
+      if (!captured) { discardPrepared(); finishScene(); resetDrag(); clearPending(); active = null; }
+      prepared = null;
       content.classList.remove('view-enter', 'hvf-route-enter');
-      if (!previous || previous === next || media('(prefers-reduced-motion: reduce)')) return false;
+      // The old scene is fixed to its original viewport; scrolling never teleports it.
+      if (!refresh && win && typeof win.scrollTo === 'function') win.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      if (reduced()) {
+        if (captured && captured.snapshot) captured.snapshot.remove();
+        return false;
+      }
       const oldIndex = ROUTES.indexOf(previous);
       const newIndex = ROUTES.indexOf(next);
-      const offset = oldIndex >= 0 && newIndex >= 0 ? (newIndex > oldIndex ? 26 : -26) : 0;
-      content.style.setProperty('--hvf-route-offset', offset + 'px');
-      // Restart only for explicit route changes, including a second navigation during an animation.
-      void content.offsetWidth;
+      const requestedDirection = intent && intent.direction;
+      const direction = refresh ? (requestedDirection === -1 || requestedDirection === 1 ? requestedDirection : 0) : oldIndex >= 0 && newIndex >= 0 ? Math.sign(newIndex - oldIndex) : 0;
+      const width = Number(win && win.innerWidth) || 390;
+      const duration = refresh ? 340 : DURATION;
+      const opacity = refresh ? 0.3 : 0.08;
+      const start = direction * Math.min(refresh ? 20 : 72, width * 0.18);
+      const oldStart = captured ? captured.offset : 0;
+      const oldEnd = -direction * (refresh ? 16 : oldStart ? Math.min(280, Math.max(Math.abs(oldStart) + 72, width * 0.52)) : 56);
+      const current = { content, snapshot: captured && captured.snapshot, cleanups: [] };
+      scene = current;
+      style(content, '--hvf-route-start', start.toFixed(2) + 'px');
+      style(content, '--hvf-route-duration', duration + 'ms');
+      style(content, '--hvf-route-opacity', String(opacity));
       content.classList.add('hvf-route-enter');
-      const onEnd = event => { if (event.target === content) clear(); };
-      const clear = () => {
-        content.classList.remove('hvf-route-enter');
-        content.style.removeProperty('--hvf-route-offset');
-        content.removeEventListener('animationend', onEnd);
-        animations.delete(content);
-      };
-      animations.set(content, clear);
-      content.addEventListener('animationend', onEnd);
+      current.cleanups.push(motion(content, [{ opacity, transform: translate(start) }, { opacity: 1, transform: translate(0) }], duration, 'hvf-css-enter', () => { if (scene === current) finishScene(); }));
+      if (current.snapshot) {
+        style(current.snapshot, '--hvf-old-start', oldStart.toFixed(2) + 'px');
+        style(current.snapshot, '--hvf-old-end', oldEnd.toFixed(2) + 'px');
+        style(current.snapshot, '--hvf-route-duration', duration + 'ms');
+        current.cleanups.push(motion(current.snapshot, [{ opacity: 1, transform: translate(oldStart) }, { opacity: 0, transform: translate(oldEnd) }], duration, 'hvf-css-leave', () => {}));
+      }
       return true;
     }
+
+    function getState() { return { dragging: !!(active && active.locked), pending: !!pending, transitioning: !!(scene || prepared || returnMotion) }; }
 
     function destroy() {
       cancel();
       listeners.splice(0).forEach(remove => remove());
-      Array.from(animations.values()).forEach(clear => clear());
       if (surface && surface.classList) surface.classList.remove('hvf-swipe-surface');
       initialized = false;
     }
 
-    return Object.freeze({ init, destroy, enter });
+    return Object.freeze({ init, destroy, prepare, enter, cancel, settle, getState });
   }
 
-  return Object.freeze({ routes: ROUTES, route, neighbor, gesture, create });
+  return Object.freeze({ routes: ROUTES, route, neighbor, gesture, displacement, create });
 });
