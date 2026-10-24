@@ -127,6 +127,33 @@
     lastError = "";
     save(); emit(); void flush();
   }
+  function putMany(records, options = {}) {
+    if (!Array.isArray(records) || records.length > 5000) throw new Error("В одной операции можно сохранить до 5000 записей.");
+    if (options.expectedOwner !== undefined && options.expectedOwner !== owner) throw new Error("Аккаунт изменился. Открой восстановление заново.");
+    const prepared = [], ids = new Set();
+    for (const record of records) {
+      if (!record || typeof record.id !== "string" || !record.id || record.id.length > 500 ||
+          typeof record.kind !== "string" || !record.kind || ids.has(record.id)) throw new Error("Проверь уникальные id и типы записей в копии.");
+      ids.add(record.id);
+      const value = clone(record);
+      value.month = value.month || (datePattern.test(value.date || "") ? value.date.slice(0, 7) : period.month);
+      if (!monthPattern.test(value.month)) throw new Error("Месяц должен иметь формат ГГГГ-ММ.");
+      const previous = own(cache.entries, value.id) ? cache.entries[value.id] : null;
+      if (previous && (previous.month !== value.month || previous.value && previous.value.kind !== value.kind)) {
+        throw new Error("Запись с таким id уже принадлежит другому месяцу или типу. Ничего не восстановлено.");
+      }
+      prepared.push(value);
+    }
+    if (!prepared.length) return [];
+    const staged = clone(cache);
+    for (const value of prepared) queue(envelopeFor(value, false, false), staged);
+    lastError = "";
+    if (!save(staged)) { emit(); throw new Error(lastError); }
+    // Keep cache identity: an in-flight cloud acknowledgement must see newer operations.
+    cache.entries = staged.entries; cache.pending = staged.pending;
+    emit(); void flush();
+    return prepared.map(clone);
+  }
   function documentFor(uid, month) {
     return api.doc(api.db, "users", uid, "planning", month);
   }
@@ -442,7 +469,7 @@
     emit(); void flush();
   });
   window.HVFStore = Object.freeze({
-    init, getState, put, remove, signInOut, setPeriod, getIdToken,
+    init, getState, put, putMany, remove, signInOut, setPeriod, getIdToken,
     subscribe(callback) {
       if (typeof callback !== "function") throw new Error("Нужна функция подписки.");
       listeners.add(callback); callback(getState());

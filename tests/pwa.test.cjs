@@ -85,7 +85,7 @@ test('installation precaches a complete public shell under the project path only
   const sw = worker();
   await sw.lifecycle('install');
   const urls = sw.requests.map(request => request.url);
-  assert.equal(urls.length, 26);
+  assert.equal(urls.length, 29);
   for (const request of sw.requests) {
     assert.ok(request.url.startsWith(SCOPE));
     assert.equal(request.cache, 'reload');
@@ -111,14 +111,16 @@ test('deployment and validation include the same shell and load the new modules 
   const required = [...validator.match(/REQUIRED = \(([\s\S]*?)\)/)[1].matchAll(/"([^"]+)"/g)].map(match => match[1]).sort();
   assert.deepEqual(required, expected, 'local validation covers the deployed files');
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-  const ui = html.indexOf('./assistant-ui.js?v=7');
+  const ui = html.indexOf('./assistant-ui.js?v=8');
   assert.ok(ui > 0);
-  for (const name of ['quick', 'focus', 'limits']) {
+  for (const name of ['categories', 'forecast', 'backup', 'focus', 'limits']) {
     const moduleIndex = html.indexOf('./assistant-' + name + '.js');
     assert.ok(moduleIndex > 0 && moduleIndex < ui, name + ' module loads before UI');
     assert.match(workflow, new RegExp('for file in [^\\n]*assistant-' + name + '\\.js'));
   }
-  for (const source of [html, workerSource, workflow, validator]) assert.doesNotMatch(source, /assistant-ai\.js/);
+  assert.ok(html.indexOf('./assistant-core.js') < html.indexOf('./assistant-forecast.js'), 'forecast uses the already loaded budget core');
+  assert.ok(html.indexOf('./assistant-categories.js') < html.indexOf('./assistant-limits.js'), 'custom category limits load their classifier first');
+  for (const source of [html, workerSource, workflow, validator]) assert.doesNotMatch(source, /assistant-(?:ai|quick)\.js/);
 });
 
 test('a missing shell file rejects installation instead of activating a partial version', async () => {

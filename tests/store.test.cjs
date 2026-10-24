@@ -176,6 +176,44 @@ test('a token requested before switching accounts is never returned to the new a
 });
 
 const task = (id, title = id) => ({ id, kind: 'task', month: '2026-10', date: '2026-10-23', title, duration: 30 });
+
+test('bulk restore validates all records before writing and detects hidden month tombstones', async () => {
+  const device=await client().start();device.store.put(task('deleted'));device.store.remove('deleted');
+  const before=device.records(),saved=device.storage.get('hvf-assistant-v2:anonymous');
+  assert.throws(()=>device.store.putMany([task('new'),{...task('deleted'),month:'2026-11',date:'2026-11-01'}]),/другому месяцу/);
+  assert.deepEqual(device.records(),before);assert.equal(device.storage.get('hvf-assistant-v2:anonymous'),saved);
+  assert.throws(()=>device.store.putMany([task('dup'),task('dup')]),/уникальные/);
+  assert.deepEqual(device.records(),before);
+});
+
+test('bulk restore survives offline reload and syncs each month to the same account', async () => {
+  const backend=new Backend(),device=await client(backend).start('alice');device.offline();
+  const records=[task('october'),{...task('november'),month:'2026-11',date:'2026-11-02'},
+    {id:'category-food',kind:'expense-category',month:'2000-03',title:'Еда',envelope:'flexible',archived:false}];
+  device.store.putMany(records,{expectedOwner:'alice'});
+  const reloaded=client(backend,device.storage);reloaded.offline();await reloaded.start('alice');
+  assert.equal(Object.keys(reloaded.records()).length,3);reloaded.online();await settle();
+  const phone=await client(backend).start('alice');assert.deepEqual(phone.records(),reloaded.records());
+  assert.equal(backend.documents.get('alice/2026-11').assistantV2.november.value.date,'2026-11-02');
+  assert.throws(()=>phone.store.putMany([task('wrong-account')],{expectedOwner:'bob'}),/Аккаунт изменился/);
+  assert.equal(phone.records()['wrong-account'],undefined);
+});
+
+test('failed durable storage leaves a bulk restore entirely unapplied', async () => {
+  const device=await client().start();device.store.put(task('existing'));const before=device.records();
+  const originalSet=device.storage.set;device.storage.set=()=>{throw new Error('quota');};
+  assert.throws(()=>device.store.putMany([task('new'),task('existing','Overwrite')]),/Не удалось сохранить/);
+  assert.deepEqual(device.records(),before);device.storage.set=originalSet;
+});
+
+test('a bulk update during a pending cloud write retains its newer operation', async () => {
+  const backend=new Backend(),device=await client(backend).start('alice');backend.holdWrites=true;
+  device.store.put(task('same','Before restore'));await settle();assert.equal(backend.held.length,1);
+  device.store.putMany([task('same','Restored'),task('another')],{expectedOwner:'alice'});
+  backend.holdWrites=false;backend.releaseOne();await settle();
+  const phone=await client(backend).start('alice');assert.equal(phone.records().same.title,'Restored');assert.equal(phone.records().another.title,'another');
+  assert.deepEqual(phone.records(),device.records());
+});
 const routine = (id = 'weekly-lessons') => ({
   id, kind: 'routine', month: '2000-02', title: 'Tutor', duration: 60, time: '18:00',
   priority: 2, weekdaysISO: [1, 5], startDate: '2026-10-23', untilDate: '',

@@ -2,14 +2,14 @@
  * Firebase requests, auth callbacks and arbitrary URLs do not. */
 "use strict";
 
-const SHELL_VERSION = "2026-10-24-4";
+const SHELL_VERSION = "2026-10-24-5";
 const SCOPE_URL = new URL("./", self.registration.scope);
 const CACHE_PREFIX = "hvf-shell:" + SCOPE_URL.pathname + ":";
 const CACHE_NAME = CACHE_PREFIX + SHELL_VERSION;
 const SHELL_FILES = [
   "index.html", "assistant.css", "assistant-finance.css", "assistant-planner.css", "assistant-reminders.css",
-  "assistant-focus.css", "assistant-limits.css", "assistant-update.css", "firebase-config.js",
-  "assistant-core.js", "assistant-store.js", "assistant-extras.js", "assistant-quick.js", "assistant-focus.js", "assistant-limits.js",
+  "assistant-focus.css", "assistant-limits.css", "assistant-update.css", "assistant-sales.css", "firebase-config.js",
+  "assistant-core.js", "assistant-forecast.js", "assistant-categories.js", "assistant-store.js", "assistant-backup.js", "assistant-extras.js", "assistant-focus.js", "assistant-limits.js",
   "assistant-planner.js", "assistant-weekly.js", "assistant-ui.js", "reminders-config.js", "assistant-reminders.js", "pwa.js", "manifest.webmanifest", "favicon.svg",
   "icon-192.png", "icon-512.png", "apple-touch-icon.png"
 ];

@@ -1,8 +1,3 @@
-.quick-capture{margin-bottom:24px;padding:19px 22px;background:var(--paper);border:1px solid var(--line);border-radius:16px}
-.quick-capture label{display:block;font-size:12px;font-weight:700;margin-bottom:9px}
-.quick-line{display:flex;align-items:stretch;gap:10px}
-.quick-line input{min-width:0;flex:1;border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--bg);color:var(--ink);font-size:12px}
-.quick-capture p{color:var(--muted);font-size:10px;line-height:1.8;margin-top:9px}
 .task-copy .focus-task-button{margin-top:10px;min-height:36px;font-size:9px}
 .focus-choices{display:grid;gap:8px}
 .focus-choices>div{display:flex;gap:16px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:13px 0}
@@ -13,5 +8,5 @@
 .focus-task-title{margin-top:18px}
 .focus-mini{animation:focus-appear .25s ease-out}
 @keyframes focus-appear{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
-@media(max-width:650px){.quick-capture{padding:16px;margin-bottom:18px}.quick-line{flex-wrap:wrap;gap:8px}.quick-line input{font-size:16px;flex-basis:100%;width:100%}.quick-line .button{min-height:44px;width:100%}.task-copy .focus-task-button{font-size:9px;padding:6px 8px}.focus-choices span{font-size:11px}.focus-choices .button{min-height:44px}.focus-choices>div{gap:10px}}
+@media(max-width:650px){.task-copy .focus-task-button{font-size:9px;padding:6px 8px}.focus-choices span{font-size:11px}.focus-choices .button{min-height:44px}.focus-choices>div{gap:10px}}
 @media(prefers-reduced-motion:reduce){.focus-mini{animation:none}}

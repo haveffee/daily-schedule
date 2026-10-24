@@ -7,7 +7,9 @@ const core = require('../assistant-core.js');
 const extras = require('../assistant-extras.js');
 const planner = require('../assistant-planner.js');
 const weekly = require('../assistant-weekly.js');
-const quick = require('../assistant-quick.js');
+const categories = require('../assistant-categories.js');
+const forecast = require('../assistant-forecast.js');
+const backup = require('../assistant-backup.js');
 const limits = require('../assistant-limits.js');
 const focusModule = require('../assistant-focus.js');
 
@@ -31,6 +33,8 @@ function createUI(initial = [], options = {}) {
   const subscribers = [];
   const periods = [];
   const writes = [];
+  const downloads = [];
+  const blobs = new Map();
   let timerNow = Date.parse(DAY+'T09:00:00Z');
   let timerTick = () => {};
   const timerData = new Map();
@@ -76,6 +80,11 @@ function createUI(initial = [], options = {}) {
     getState: () => clone(current),
     subscribe(callback) { subscribers.push(callback); },
     put(record) { writes.push({ action: 'put', record: clone(record) }); current.records[record.id] = clone(record); publish(); },
+    putMany(records, options={}) {
+      if(options.expectedOwner!==undefined&&options.expectedOwner!==(current.user?.uid||'anonymous'))throw new Error('Аккаунт изменился.');
+      for(const record of records){const old=current.records[record.id];if(old&&(old.month!==record.month||old.kind!==record.kind))throw new Error('Несовместимая запись.');}
+      for(const record of records){writes.push({action:'put',record:clone(record)});current.records[record.id]=clone(record);}publish();return clone(records);
+    },
     remove(id) { writes.push({ action: 'remove', id }); delete current.records[id]; publish(); },
     setPeriod(month, day) { periods.push({ month, day }); },
     init: async () => {}, signInOut: async () => {}
@@ -88,12 +97,13 @@ function createUI(initial = [], options = {}) {
   const window = {
     HVFCore: core, HVFExtras: extras, HVFPlanner: planner, HVFWeekly: weekly, HVFStore: store,
     HVFPWA: options.pwa, HVFReminders: options.reminders,
-    HVFQuick: quick, HVFLimits: limits, HVFFocus: focus,
+    HVFCategories: categories, HVFForecast: forecast, HVFBackup: backup, HVFLimits: limits, HVFFocus: focus,
     addEventListener(type, callback) { windowEvents.set(type, callback); },
     scrollTo() {}
   };
   const document = {
     getElementById: node, querySelectorAll: () => [],
+    createElement:()=>({click(){downloads.push({name:this.download,blob:blobs.get(this.href)});}}),
     addEventListener(type, callback) { documentEvents.set(type, callback); }
   };
   class FixedDate extends Date {
@@ -105,13 +115,14 @@ function createUI(initial = [], options = {}) {
     get(name) { return Object.hasOwn(this.values, name) ? this.values[name] : null; }
   }
   vm.runInNewContext(source, {
-    document, window, location, FormData, Date: FixedDate, Intl,
+    document, window, location, FormData, Date: FixedDate, Intl, Blob,
+    URL:{createObjectURL(blob){const id='blob:'+blobs.size;blobs.set(id,blob);return id;},revokeObjectURL(){}},
     crypto: { randomUUID: () => 'ui-' + (++sequence) },
     setTimeout: () => ++sequence, clearTimeout() {}
   }, { filename: 'assistant-ui.js' });
 
   return {
-    node, periods, writes, focus,
+    node, periods, writes, focus, downloads,
     elapse(ms) {timerNow+=ms;timerTick();return focus.getState();},
     form(id,values) {documentEvents.get('submit')({target:{id,values},preventDefault(){}});},
     records: kind => Object.values(clone(current.records)).filter(record => !kind || record.kind === kind),
@@ -266,23 +277,148 @@ test('Qwen controls and generic goal generation are gone while saved steps survi
   assert.equal(ui.records('task').length,1);assert.equal(ui.writes.length,0);
 });
 
-test('quick input opens a review before any write and saves explicit date/time/duration', async () => {
-  const ui=createUI();ui.navigate('#day');
-  ui.form('quickTaskForm',{quickText:'Завтра в 18:00 репетитор на час'});
-  assert.equal(ui.node('dialogTitle').textContent,'Новое дело');
-  assert.match(ui.fields(),/Проверь перед сохранением/);
-  for(const value of ['репетитор','2026-10-24','18:00','60'])assert.ok(ui.fields().includes('value="'+value+'"'),value);
-  assert.equal(ui.records('task').length,0);
-  await ui.submit(taskFields({title:'репетитор',date:'2026-10-24',time:'18:00',duration:'60'}));
-  const [task]=ui.records('task');assert.equal(task.date,'2026-10-24');assert.equal(task.duration,60);assert.equal(task.estimated,false);assert.equal(task.moveCount,undefined);
-  assert.match(ui.html(),/id="quickText"[^>]*value=""/);
+test('day has a single task entry without the redundant quick form', () => {
+  const ui=createUI();ui.navigate('#day');assert.doesNotMatch(ui.html(),/quickTaskForm|quickText|Быстро записать/);ui.click('add-task');assert.equal(ui.node('dialogTitle').textContent,'Новое дело');
 });
 
-test('quick input retains uncertain fragments and escapes their review text', () => {
-  const ui=createUI();ui.navigate('#day');
-  ui.form('quickTaskForm',{quickText:'Завтра в 25:10 купить <script> на час'});
-  assert.match(ui.fields(),/25:10/);assert.match(ui.fields(),/&lt;script&gt;/);assert.doesNotMatch(ui.fields(),/<script>/);
-  assert.match(ui.fields(),/врем|часов/i);assert.equal(ui.writes.length,0);
+test('first-run wizard reviews three steps and saves linked data only at the end', async () => {
+  const ui=createUI();ui.navigate('#overview');assert.match(ui.html(),/Начни со своего дня и бюджета/);
+  ui.click('start-onboarding');assert.match(ui.node('dialogTitle').textContent,/шаг 1 из 3/);
+  await ui.submit({currency:'BYN',salary:'1000',nextDate:'2026-10-30',expectedAmount:'1200'});
+  assert.equal(ui.records().length,0);assert.equal(ui.node('editor').open,true);
+  await ui.submit({goalTitle:'Подготовиться',outcome:'Решить пять вариантов'});
+  assert.equal(ui.records().length,0);assert.match(ui.fields(),/Будет сохранено/);
+  await ui.submit({taskTitle:'Решить первый вариант',duration:'45',start:'10:00',end:'20:00'});
+  assert.equal(ui.node('editor').open,false);assert.equal(ui.records('budget')[0].income,1000);
+  assert.equal(ui.records('income-plan')[0].expectedAmount,1200);
+  assert.equal(ui.records('task')[0].goalId,ui.records('goal')[0].id);
+  assert.equal(ui.records('task')[0].duration,45);assert.equal(ui.records('settings')[0].start,'10:00');
+  assert.equal(ui.records('onboarding-preferences')[0].completed,true);
+  ui.navigate('#money');assert.equal(statValue(ui,'Все поступления'),'1 000 BYN');
+  ui.navigate('#overview');assert.doesNotMatch(ui.html(),/Начни со своего дня и бюджета/);
+});
+
+test('wizard cancellation and optional fields never generate example records', async () => {
+  const ui=createUI();ui.click('start-onboarding');
+  await ui.submit({currency:'BYN',salary:'',nextDate:'',expectedAmount:''});
+  await ui.node('cancelDialog').fire('click');assert.equal(ui.writes.length,0);
+  ui.click('start-onboarding');
+  await ui.submit({currency:'USD',salary:'',nextDate:'',expectedAmount:''});
+  await ui.submit({goalTitle:'',outcome:''});
+  await ui.submit({taskTitle:'',duration:'',start:'09:00',end:'22:00'});
+  for(const kind of ['task','goal','budget','income-plan'])assert.equal(ui.records(kind).length,0,kind);
+  assert.equal(ui.records('finance-preferences')[0].currency,'USD');
+});
+
+test('wizard validates amounts, dates and rhythm before any data is written', async () => {
+  const ui=createUI();ui.click('start-onboarding');
+  await ui.submit({currency:'BYN',salary:'Infinity',nextDate:'',expectedAmount:''},/Укажи сумму/);
+  await ui.submit({currency:'BYN',salary:'100',nextDate:'2026-02-30',expectedAmount:''},/дату/);
+  await ui.submit({currency:'BYN',salary:'100',nextDate:'',expectedAmount:''});
+  await ui.submit({goalTitle:'Цель',outcome:''});
+  await ui.submit({taskTitle:'Дело',duration:'30',start:'20:00',end:'09:00'},/Конец дня/);
+  assert.equal(ui.writes.length,0);ui.account('other');assert.equal(ui.node('editor').open,false);
+});
+
+const settleUI=async()=>{for(let i=0;i<4;i++)await new Promise(resolve=>setImmediate(resolve));};
+async function openBackup(ui,records) {
+  const text=JSON.stringify(backup.create(records));
+  ui.change({},false,{id:'backupFile',files:[{name:'my-copy.json',size:text.length,text:async()=>text}]});
+  await settleUI();
+}
+
+test('restore previews full copies and merge preserves differing existing records', async () => {
+  const existing=dayTask('same',{title:'Текущая версия'}),old={id:'old',kind:'income',month:'2026-09',date:'2026-09-10',title:'Подработка',amount:50,currency:'BYN'};
+  const ui=createUI([existing]);
+  await openBackup(ui,[{...existing,title:'Из копии'},old]);
+  assert.match(ui.fields(),/my-copy.json/);assert.match(ui.fields(),/Пропустить совпадения/);assert.equal(ui.writes.length,0);
+  await ui.submit({});
+  assert.equal(ui.records('task')[0].title,'Текущая версия');assert.equal(ui.records('income')[0].month,'2026-09');
+  assert.match(ui.node('toastText').textContent,/Восстановлено записей: 1/);
+});
+
+test('restore replaces only explicitly selected collisions and rechecks changed account data', async () => {
+  const t=dayTask('same',{title:'Сейчас'}),ui=createUI([t,dayTask('unrelated')]);
+  await openBackup(ui,[{...t,title:'Из копии'}]);
+  ui.change({},true,{id:'replaceExisting'});assert.match(ui.fields(),/будет заменено/);
+  ui.upsert({...t,title:'Изменено на телефоне'});
+  await ui.submit({replaceExisting:'on'},/Данные или режим изменились/);
+  assert.equal(ui.records('task').find(r=>r.id==='same').title,'Изменено на телефоне');
+  await ui.submit({replaceExisting:'on'});
+  assert.equal(ui.records('task').find(r=>r.id==='same').title,'Из копии');assert.equal(ui.records('task').length,2);
+});
+
+test('corrupt copies and account switching do not restore data', async () => {
+  const ui=createUI();ui.change({},false,{id:'backupFile',files:[{size:4,text:async()=>'{bad'}]});await settleUI();
+  assert.equal(ui.node('editor').open,false);assert.equal(ui.writes.length,0);
+  await openBackup(ui,[dayTask('new')]);ui.account('other');assert.equal(ui.node('editor').open,false);assert.equal(ui.writes.length,0);
+});
+
+test('a slow backup file never replaces an editor opened while it is being read', async () => {
+  const ui=createUI();let finish;
+  const wait=new Promise(resolve=>finish=resolve);
+  ui.change({},false,{id:'backupFile',files:[{size:100,text:()=>wait}]});
+  ui.click('add-task');const fields=ui.fields();finish(JSON.stringify(backup.create([dayTask('from-file')])));await settleUI();
+  assert.equal(ui.fields(),fields);assert.equal(ui.node('dialogTitle').textContent,'Новое дело');assert.equal(ui.writes.length,0);
+  assert.match(ui.node('toastText').textContent,/Закрой открытую форму/);
+});
+
+test('full export contains all months and global categories without auth credentials', async () => {
+  const ui=createUI([dayTask('today'),{...dayTask('old'),month:'2026-09',date:'2026-09-10'},{id:'category-food',kind:'expense-category',month:'2000-03',title:'Еда',envelope:'flexible',archived:false}]);
+  ui.account('alice',ui.records());ui.click('export');assert.equal(ui.downloads.length,1);
+  const exported=JSON.parse(await ui.downloads[0].blob.text());assert.equal(exported.scope,'all');assert.equal(exported.records.length,3);
+  assert.equal(exported.user,undefined);assert.equal(exported.records.some(r=>r.id==='category-food'),true);
+});
+
+test('custom categories classify expenses, preserve past envelopes and survive archiving across months', async () => {
+  const ui=createUI();ui.click('add-category');await ui.submit({title:'Еда',envelope:'flexible'});
+  const [category]=ui.records('expense-category');assert.match(category.id,/^category-/);
+  ui.click('add-expense');assert.match(ui.fields(),/Еда · Свободные деньги/);
+  await ui.submit({title:'Продукты',amount:'20',date:DAY,currency:'BYN',category:'category:'+category.id});
+  const [expense]=ui.records('expense');assert.equal(expense.category,'flexible');assert.equal(expense.expenseCategoryId,category.id);
+  ui.click('edit-category',category.id);await ui.submit({title:'Продукты и еда',envelope:'essentials'});
+  assert.equal(ui.records('expense')[0].category,'flexible');assert.match(ui.html(),/Продукты и еда/);
+  ui.click('archive-category',category.id);await ui.submit({});
+  ui.click('edit-expense',expense.id);assert.match(ui.fields(),/Продукты и еда \(архив\)/);
+  await ui.submit({title:'Продукты',amount:'20',date:'2026-11-02',currency:'BYN',category:'category:'+category.id});
+  const [moved]=ui.records('expense');assert.equal(moved.month,'2026-11');assert.equal(moved.expenseCategoryId,category.id);assert.equal(moved.category,'flexible');
+  ui.click('restore-category',category.id);assert.equal(ui.records('expense-category')[0].archived,false);
+});
+
+test('category creation rejects duplicates and custom limits count only their category', async () => {
+  const category={id:'category-food',kind:'expense-category',month:'2000-03',title:'Еда',envelope:'flexible',archived:false};
+  const ui=createUI([category,{id:'food',kind:'expense',month:MONTH,date:DAY,title:'Хлеб',amount:20,currency:'BYN',category:'flexible',expenseCategoryId:category.id,expenseCategoryTitle:'Еда'},{id:'other',kind:'expense',month:MONTH,date:DAY,title:'Досуг',amount:50,currency:'BYN',category:'flexible'}]);
+  ui.click('add-category');await ui.submit({title:' еда ',envelope:'flexible'},/уже существует/);await ui.node('cancelDialog').fire('click');
+  ui.click('edit-limit','limit-'+MONTH+'-BYN-'+category.id);await ui.submit({amount:'25',warningPercent:'80'});
+  const row=limits.summarize(ui.records(),{month:MONTH,currency:'BYN'}).find(r=>r.category===category.id);assert.equal(row.spent,20);assert.equal(row.status,'near');
+  assert.match(ui.html(),/Лимиты расходов/);
+});
+
+test('legacy unlinked goal expenses retain their budget group when edited', async () => {
+  const ui=createUI([{id:'legacy',kind:'expense',month:MONTH,date:DAY,title:'Для цели',amount:10,currency:'BYN',category:'goal'}]);
+  ui.click('edit-expense','legacy');assert.match(ui.fields(),/value="goals" selected/);
+  await ui.submit({title:'Для цели',amount:'15',date:DAY,currency:'BYN',category:'goals'});
+  assert.equal(ui.records('expense')[0].category,'goals');
+});
+
+test('income forecast has an actionable date, excludes the expected amount and ignores viewed history month', async () => {
+  const ui=createUI();await salary(ui,1000,'0','0');ui.click('edit-income-plan');
+  await ui.submit({nextDate:'2026-11-02',expectedAmount:'2000'});
+  assert.equal(statValue(ui,'Все поступления'),'1 000 BYN');assert.match(ui.html(),/100 BYN в день/);
+  assert.match(ui.html(),/Ожидается 2 000 BYN/);await ui.setMonth('2026-09');
+  assert.equal(statValue(ui,'Все поступления'),'0 BYN');assert.match(ui.html(),/100 BYN в день/);
+  ui.click('currency','USD');assert.match(ui.html(),/Когда следующее поступление/);assert.doesNotMatch(ui.html(),/100 USD в день/);
+});
+
+test('future-dated receipts and expenses do not inflate today balances but affect the forecast', () => {
+  const ui=createUI([
+    {id:'budget-'+MONTH+'-BYN',kind:'budget',month:MONTH,currency:'BYN',income:1000,reservePercent:0,goalsPercent:0},
+    {id:'future-income',kind:'income',month:MONTH,date:'2026-10-26',title:'Будущий подарок',amount:500,currency:'BYN'},
+    {id:'future-expense',kind:'expense',month:MONTH,date:'2026-10-24',title:'Платёж завтра',amount:100,currency:'BYN',category:'flexible'},
+    {id:'income-plan-BYN',kind:'income-plan',month:'2000-04',currency:'BYN',nextDate:'2026-10-28',expectedAmount:2000}
+  ]);
+  assert.equal(statValue(ui,'Все поступления'),'1 000 BYN');assert.equal(statValue(ui,'Всего осталось'),'1 000 BYN');
+  assert.match(ui.html(),/180 BYN в день/);assert.match(ui.html(),/Запланировано/);
 });
 
 test('focus pauses, resumes and finishes without completing the task or clearing an open editor', async () => {

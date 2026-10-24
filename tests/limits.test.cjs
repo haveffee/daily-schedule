@@ -140,3 +140,93 @@ test('invalid context fails clearly and non-array record input stays empty', () 
   assert.equal(summarize(null, options).length, 4);
   assert.deepEqual(crossing(null, null), []);
 });
+
+function customCategory(id = 'category-food', changes = {}) {
+  return { id, kind: 'expense-category', month: '2000-03', title: 'Продукты', envelope: 'essentials', archived: false, ...changes };
+}
+
+test('custom category limits count linked expenses while envelope limits retain the full envelope', () => {
+  const rows = summarize([customCategory(), limit('essentials', 200), limit('category-food', 100),
+    expense(60, { category: 'essentials', expenseCategoryId: 'category-food', expenseCategoryTitle: 'Продукты' }),
+    expense(30, { category: 'essentials' }), expense(12, { category: 'essentials', expenseCategoryId: 'category-bus' }),
+    expense(15, { category: 'flexible' })], options);
+  const custom = rows.find(row => row.category === 'category-food');
+  assert.equal(custom.id, 'limit-2026-10-BYN-category-food');
+  assert.equal(custom.title, 'Продукты');
+  assert.equal(custom.spent, 60);
+  assert.equal(custom.remaining, 40);
+  assert.equal(custom.custom, true);
+  assert.equal(custom.envelope, 'essentials');
+  assert.equal(rows.find(row => row.category === 'essentials').spent, 102);
+  assert.equal(rows.find(row => row.category === 'flexible').spent, 15);
+});
+
+test('active categories offer limits without expenses and archived categories retain relevant history only', () => {
+  const records = [customCategory(), customCategory('category-unused', { title: 'Кино', archived: true }),
+    customCategory('category-old', { title: 'Старая категория', archived: true }),
+    expense(22, { expenseCategoryId: 'category-old' })];
+  const rows = summarize(records, options);
+  assert.ok(rows.find(row => row.category === 'category-food'));
+  assert.equal(rows.find(row => row.category === 'category-old').archived, true);
+  assert.equal(rows.find(row => row.category === 'category-old').spent, 22);
+  assert.equal(rows.some(row => row.category === 'category-unused'), false);
+  assert.equal(summarize([...records, limit('category-unused', 10)], options).find(row => row.category === 'category-unused').amount, 10);
+  assert.equal(summarize(records, { month: '2026-11', currency: 'BYN' }).some(row => row.category === 'category-old'), false);
+});
+
+test('missing custom categories use history or limit title snapshots without losing totals', () => {
+  const records = [expense(10, { expenseCategoryId: 'category-gone', expenseCategoryTitle: 'Старое имя', createdAt: 1 }),
+    expense(15, { expenseCategoryId: 'category-gone', expenseCategoryTitle: 'Новое имя', createdAt: 2 }),
+    limit('category-empty', 50, { categoryTitle: 'Старый лимит' })];
+  const rows = summarize(records, options);
+  assert.equal(rows.find(row => row.category === 'category-gone').spent, 25);
+  assert.equal(rows.find(row => row.category === 'category-gone').title, 'Новое имя');
+  assert.equal(rows.find(row => row.category === 'category-gone').archived, true);
+  assert.equal(rows.find(row => row.category === 'category-empty').title, 'Старый лимит');
+  assert.equal(rows.find(row => row.category === 'flexible').spent, 25);
+});
+
+test('moving a category affects future envelopes without rewriting expense snapshots or category limits', () => {
+  const records = [customCategory('category-food', { title: 'Еда', envelope: 'flexible' }),
+    expense(80, { category: 'essentials', expenseCategoryId: 'category-food' }),
+    expense(20, { category: 'flexible', expenseCategoryId: 'category-food' }), limit('category-food', 100)];
+  const rows = summarize(records, options);
+  assert.equal(rows.find(row => row.category === 'essentials').spent, 80);
+  assert.equal(rows.find(row => row.category === 'flexible').spent, 20);
+  assert.equal(rows.find(row => row.category === 'category-food').spent, 100);
+  assert.equal(rows.find(row => row.category === 'category-food').status, 'exceeded');
+  assert.equal(rows.find(row => row.category === 'category-food').title, 'Еда');
+});
+
+test('custom ledgers keep currency and months isolated, and links keep envelope semantics', () => {
+  const rows = summarize([customCategory('category-food', { envelope: 'flexible' }),
+    expense(80, { expenseCategoryId: 'category-food', currency: 'USD' }),
+    expense(5, { expenseCategoryId: 'category-food', commitmentId: 'tutor' }),
+    expense(7, { expenseCategoryId: 'category-food', goalId: 'trip' }),
+    expense(90, { expenseCategoryId: 'category-food', date: '2026-11-01', month: '2026-11' }),
+    expense(90, { expenseCategoryId: 'category-food', deleted: true })], options);
+  assert.equal(rows.find(row => row.category === 'category-food').spent, 12);
+  assert.equal(rows.find(row => row.category === 'essentials').spent, 5);
+  assert.equal(rows.find(row => row.category === 'goals').spent, 7);
+});
+
+test('custom warning crossings occur once per increased threshold, including simultaneous envelope warnings', () => {
+  const base = [customCategory(), limit('essentials', 100), limit('category-food', 100)];
+  const at = amount => summarize([...base, expense(amount, { category: 'essentials', expenseCategoryId: 'category-food' })], options);
+  const alerts = crossing(at(79.99), at(80));
+  assert.deepEqual(alerts.map(row => row.category), ['essentials', 'category-food']);
+  assert.equal(crossing(at(80), at(90)).length, 0);
+  assert.equal(crossing(at(90), at(100)).find(row => row.category === 'category-food').status, 'exceeded');
+  assert.equal(crossing(at(100), at(10)).length, 0);
+  assert.equal(crossing(at(100), at(100)).length, 0);
+});
+
+test('unsafe custom identifiers and malformed category metadata never create hidden rows or change accounting', () => {
+  const rows = summarize([customCategory('category-<script>'), customCategory('category-bad', { envelope: 'unknown' }),
+    expense(10, { expenseCategoryId: '__proto__', category: 'flexible' }),
+    expense(20, { expenseCategoryId: 'category-../path', category: 'essentials' }),
+    limit('category-../path', 100), limit('category-inactive', 0)], options);
+  assert.equal(rows.length, 4);
+  assert.equal(rows.find(row => row.category === 'flexible').spent, 10);
+  assert.equal(rows.find(row => row.category === 'essentials').spent, 20);
+});

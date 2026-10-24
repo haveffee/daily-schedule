@@ -1,9 +1,9 @@
 (function (root, factory) {
   'use strict';
-  var api = factory();
+  var api = factory(typeof module === 'object' && module.exports ? require('./assistant-categories.js') : root && root.HVFCategories);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.HVFLimits = api;
-}(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+}(typeof globalThis !== 'undefined' ? globalThis : this, function (categories) {
   'use strict';
 
   var CATEGORIES = ['essentials', 'reserve', 'goals', 'flexible'];
@@ -53,6 +53,7 @@
 
   function category(record) {
     if (record.commitmentId) return 'essentials';
+    if (record.goalId) return 'goals';
     var value = String(record.category || '').trim().toLowerCase();
     if (['essential', 'essentials', 'needs', 'food', 'housing', 'bills', 'transport', 'health', 'обязательные', 'еда', 'жилье', 'транспорт', 'здоровье'].indexOf(value) >= 0) return 'essentials';
     if (value === 'reserve' || value === 'резерв') return 'reserve';
@@ -67,7 +68,10 @@
 
   /**
    * A limit is a spending warning, not an allocation or a protected balance.
-   * Return every category so an empty ledger still has four editable limits.
+   * Keep the original four envelope limits and offer custom category limits.
+   * Envelope totals include their custom expenses; a custom total includes only
+   * expenses explicitly linked to that category, without double counting within
+   * either limit. Archived categories remain visible while their history matters.
    * Only actual dated expenses count; salary, reserved money and savings do not.
    */
   function summarize(records, options) {
@@ -79,23 +83,56 @@
     var source = (Array.isArray(records) ? records : []).filter(function (record) {
       return record && typeof record === 'object' && !record.deleted;
     });
+    var categoryRecords = categories ? categories.list(source, { includeArchived: true }) : [];
+    var metadata = Object.create(null);
+    categoryRecords.forEach(function (record) { metadata[record.id] = record; });
     var totals = { essentials: 0, reserve: 0, goals: 0, flexible: 0 };
+    var customTotals = Object.create(null);
+    var snapshots = Object.create(null);
+    function validCustomId(value) {
+      return categories ? categories.validId(value) : typeof value === 'string' && /^category-[a-zA-Z0-9][a-zA-Z0-9_-]{0,119}$/.test(value);
+    }
+    function remember(record) {
+      var key = record.expenseCategoryId;
+      if (!validCustomId(key)) return;
+      var previous = snapshots[key];
+      if (!previous || (Number(record.updatedAt) || Number(record.createdAt) || 0) >= (Number(previous.updatedAt) || Number(previous.createdAt) || 0)) snapshots[key] = record;
+    }
     source.forEach(function (record) {
       if (record.kind !== 'expense' || currency(record.currency) !== code || !validDate(record.date) || record.date.slice(0, 7) !== month) return;
       // A contradictory month indicates a damaged/imported record. Missing
       // month remains compatible with a legacy expense that has a valid date.
       if (record.month !== undefined && record.month !== null && record.month !== '' && record.month !== month) return;
-      var key = category(record);
-      totals[key] = Math.min(MAX_CENTS, totals[key] + cents(record.amount));
+      var amount = cents(record.amount);
+      var key = categories ? categories.classification(record, categoryRecords).envelope : category(record);
+      totals[key] = Math.min(MAX_CENTS, totals[key] + amount);
+      if (validCustomId(record.expenseCategoryId) && amount > 0) {
+        customTotals[record.expenseCategoryId] = Math.min(MAX_CENTS, (customTotals[record.expenseCategoryId] || 0) + amount);
+        remember(record);
+      }
     });
-    return CATEGORIES.map(function (key) {
+    var keys = CATEGORIES.concat(categoryRecords.filter(function (record) { return !record.archived; }).map(function (record) { return record.id; }));
+    Object.keys(customTotals).forEach(function (key) { if (keys.indexOf(key) < 0) keys.push(key); });
+    source.forEach(function (record) {
+      var key = record.category;
+      if (record.kind === 'spending-limit' && validCustomId(key) && record.id === 'limit-' + month + '-' + code + '-' + key &&
+        record.month === month && currency(record.currency) === code && cents(record.amount) > 0 && keys.indexOf(key) < 0) keys.push(key);
+    });
+    return keys.map(function (key) {
       var id = 'limit-' + month + '-' + code + '-' + key;
       var record = source.find(function (item) {
         return item.id === id && item.kind === 'spending-limit' && item.month === month && currency(item.currency) === code && item.category === key;
       });
       var amount = record ? cents(record.amount) : 0;
       var configured = amount > 0;
-      var spent = totals[key];
+      var custom = CATEGORIES.indexOf(key) < 0;
+      var info = metadata[key];
+      var snapshot = snapshots[key];
+      var spent = custom ? customTotals[key] || 0 : totals[key];
+      var archived = custom && (!info || info.archived === true);
+      var title = custom ? info ? info.title : snapshot && String(snapshot.expenseCategoryTitle || '').trim().slice(0, 48) ||
+        record && String(record.categoryTitle || '').trim().slice(0, 48) || 'Категория из архива' :
+        { essentials: 'Обязательные расходы', reserve: 'Резерв', goals: 'Цели', flexible: 'Свободные деньги' }[key];
       var threshold = warningPercent(record && record.warningPercent);
       var status = 'ok';
       if (configured) {
@@ -104,6 +141,8 @@
       }
       return {
         id: id, category: key, month: month, currency: code,
+        title: title, envelope: custom ? info ? info.envelope : snapshot ? category(snapshot) : 'flexible' : key,
+        custom: custom, archived: archived,
         configured: configured, amount: amount / 100, spent: spent / 100,
         remaining: configured ? (amount - spent) / 100 : null,
         percent: configured ? Number(BigInt(spent) * 10000n / BigInt(amount)) / 100 : 0,
