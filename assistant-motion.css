@@ -1,42 +1,50 @@
 /* One quiet rhythm for controls; moving pages are owned by navigation. */
-:root{--motion-soft:cubic-bezier(.22,1,.36,1);--motion-quick:cubic-bezier(.2,.8,.2,1)}
+:root{--motion-soft:cubic-bezier(.23,1,.32,1);--motion-quick:ease;-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
 .button,.icon-button,.text-link,.date-arrows button,.filter-chip,.currency-tab,.backup-file-label,.focus-presets button,.focus-mini,.week-day,.report-task,.nav a,.mobile-nav a,summary{
-  transition:scale .32s var(--motion-soft),transform .32s var(--motion-soft),background-color .24s var(--motion-quick),border-color .24s var(--motion-quick),color .24s var(--motion-quick),box-shadow .28s var(--motion-soft),opacity .2s ease,filter .24s ease;
+  transition:scale .16s var(--motion-soft),transform .16s var(--motion-soft),background-color .16s var(--motion-quick),border-color .16s var(--motion-quick),color .16s var(--motion-quick),opacity .16s ease;
   transform-origin:center;-webkit-tap-highlight-color:transparent
 }
 .hvf-motion-ready :is(.button,.icon-button,.date-arrows button):active:not(:disabled){transform:none}
-.hvf-motion-ready .hvf-pressed{scale:.972;transition-duration:.085s,.085s,.14s,.14s,.14s,.14s,.14s,.14s}
+.hvf-motion-ready .hvf-pressed{scale:.972;transition-duration:.1s,.1s,.14s,.14s,.14s,.14s}
 .hvf-motion-ready :is(.icon-button,.date-arrows button,.nav a,.mobile-nav a).hvf-pressed{scale:.94}
-.hvf-motion-ready :is(input[type=checkbox],input[type=radio]){transition:scale .25s var(--motion-soft),opacity .2s ease}
+.hvf-motion-ready :is(input[type=checkbox],input[type=radio]){transition:scale .16s var(--motion-soft),opacity .16s ease}
 .hvf-motion-ready :is(input[type=checkbox],input[type=radio]).hvf-pressed{scale:.89}
 .weekday-picker span,.move-selection label,.category-icon-picker label,.restore-choice,.setup-progress li{
-  transition:background-color .24s var(--motion-quick),border-color .24s var(--motion-quick),color .24s var(--motion-quick),box-shadow .28s var(--motion-soft)
+  transition:background-color .16s var(--motion-quick),border-color .16s var(--motion-quick),color .16s var(--motion-quick)
 }
-.category-icon-picker .category-symbol{transition:scale .32s var(--motion-soft),background-color .24s ease,color .24s ease}
+.category-icon-picker .category-symbol{transition:scale .16s var(--motion-soft),background-color .16s ease,color .16s ease}
 .category-icon-picker label:has(input:checked) .category-symbol{scale:1.08}
-.switch span{transition:background-color .26s var(--motion-quick)}
-.switch span::after{transition:transform .34s var(--motion-soft),box-shadow .24s ease}
+.switch span{transition:background-color .16s var(--motion-quick)}
+.switch span::after{transition:transform .2s var(--motion-soft)}
 .switch input:checked+span::after{box-shadow:0 1px 4px #17392f20}
 .field input,.field select,.field textarea,.day-tools input,.month-picker input,.inline-form input,.focus-task-choice select,.focus-task-choice input{
-  transition:border-color .23s var(--motion-quick),box-shadow .28s var(--motion-soft),background-color .23s ease
+  transition:border-color .16s var(--motion-quick),background-color .16s ease
 }
-.progress-fill,.budget-bar span{transition:width .65s var(--motion-soft),background-color .28s ease}
-.week-column i{transition:height .55s var(--motion-soft)}
-.task-row{transition:opacity .28s ease,background-color .3s ease}
-.task-copy h3{transition:color .28s ease}
+.progress-fill,.budget-bar span,.limit-fill{transition:background-color .16s ease}
+.week-column i{transition:none}
+.task-row{transition:opacity .16s ease,background-color .16s ease}
+.task-copy h3{transition:color .16s ease}
 .hvf-motion-ready dialog.hvf-dialog-motion[open]{animation:none}
 .hvf-motion-ready dialog.hvf-dialog-motion[open] #dialogFields>:is(.field,.field-row,.weekday-field){animation:none}
-.hvf-motion-ready dialog.hvf-dialog-motion[open]::backdrop{animation:hvf-soft-backdrop .34s var(--motion-soft) both;transition:background-color .17s ease}
-.hvf-motion-ready dialog.hvf-dialog-exiting[open]::backdrop{animation:none;background-color:#182d2700}
-.toast:not([hidden]){animation:hvf-soft-toast .38s var(--motion-soft) both}
+.hvf-motion-ready dialog.hvf-dialog-motion[open]::backdrop{animation:none;opacity:1;transition:opacity .2s var(--motion-soft)}
+.hvf-motion-ready dialog.hvf-dialog-exiting[open]::backdrop{animation:none;opacity:0}
+.toast:not([hidden]){animation:none;opacity:1;transform:translateX(-50%) translateY(0);transition:opacity .2s ease,transform .2s ease}
 summary{border-radius:7px;touch-action:manipulation}
-@keyframes hvf-soft-backdrop{from{opacity:0}to{opacity:1}}
-@keyframes hvf-soft-toast{from{opacity:0;transform:translateX(-50%) translateY(13px) scale(.98)}to{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}}
+.button,.icon-button,.filter-chip,.currency-tab,.nav a,.date-arrows button,.backup-file-label,.focus-presets button,summary{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+@starting-style{
+  .hvf-motion-ready dialog.hvf-dialog-motion[open]::backdrop{opacity:0}
+  .toast:not([hidden]){opacity:0;transform:translateX(-50%) translateY(8px)}
+}
 @media(hover:hover) and (pointer:fine){
   .button:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 5px 16px #244c4014}
   .button.secondary:hover:not(:disabled){border-color:#c2cfb9}
   .icon-button:hover{transform:translateY(-1px)}
   .category-icon-picker label:hover{border-color:#b1c19f;background:#f6f8f0}
+}
+@media(hover:none){
+  .button:hover:not(:disabled){filter:none;box-shadow:none;transform:none}
+  .icon-button:hover{background:transparent;transform:none}
+  .nav a:hover:not(.active){background:transparent}
 }
 @media(prefers-reduced-motion:reduce){
   .hvf-motion-ready .hvf-pressed,.category-icon-picker label:has(input:checked) .category-symbol{scale:1!important}

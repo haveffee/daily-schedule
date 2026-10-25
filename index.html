@@ -12,7 +12,7 @@
   <link rel="apple-touch-icon" href="./apple-touch-icon-v2.png" sizes="180x180" type="image/png">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="stylesheet" href="./assistant.css?v=5">
-  <link rel="stylesheet" href="./assistant-navigation.css?v=2">
+  <link rel="stylesheet" href="./assistant-navigation.css?v=3">
   <link rel="stylesheet" href="./assistant-finance.css?v=3">
   <link rel="stylesheet" href="./assistant-planner.css?v=2">
   <link rel="stylesheet" href="./assistant-reminders.css?v=1">
@@ -21,7 +21,8 @@
   <link rel="stylesheet" href="./assistant-update.css?v=2">
   <link rel="stylesheet" href="./assistant-sales.css?v=3">
   <link rel="stylesheet" href="./assistant-membership.css?v=2">
-  <link rel="stylesheet" href="./assistant-motion.css?v=1">
+  <link rel="stylesheet" href="./assistant-guide.css?v=1">
+  <link rel="stylesheet" href="./assistant-motion.css?v=2">
   <link rel="stylesheet" href="./assistant-onboarding.css?v=1">
   <link rel="stylesheet" href="./assistant-mobile.css?v=2">
   <script defer src="./app-config.js?v=1"></script>
@@ -39,10 +40,11 @@
   <script defer src="./assistant-reminders.js?v=2"></script>
   <script defer src="./assistant-focus.js?v=1"></script>
   <script defer src="./assistant-limits.js?v=2"></script>
-  <script defer src="./assistant-navigation.js?v=2"></script>
-  <script defer src="./assistant-motion.js?v=1"></script>
+  <script defer src="./assistant-navigation.js?v=3"></script>
+  <script defer src="./assistant-motion.js?v=2"></script>
+  <script defer src="./assistant-guide.js?v=1"></script>
   <script defer src="./assistant-billing.js?v=1"></script>
-  <script defer src="./assistant-ui.js?v=12"></script>
+  <script defer src="./assistant-ui.js?v=13"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">К содержимому</a>
@@ -60,7 +62,7 @@
   </aside>
   <div class="workspace">
     <header class="topbar"><span class="topbar-title">Твоё личное пространство</span><div class="topbar-controls"><span class="timezone">Минск · UTC+3</span><label class="month-picker"><span class="sr-only">Выбрать месяц</span><input type="month" id="monthPicker" required></label><a class="avatar" id="syncBadge" href="#settings" aria-label="Настройки и синхронизация"><img src="./favicon.svg" width="32" height="32" alt=""></a></div></header>
-    <main id="main" tabindex="-1"><div id="content"></div></main>
+    <main id="main" tabindex="-1"><div id="notificationOffer" hidden></div><div id="content"></div></main>
     <footer>HVF <span>·</span> Место для твоих планов <span>·</span> <a href="./privacy.html">Конфиденциальность</a> <span>·</span> <a href="./terms.html">Условия</a></footer>
   </div>
   <dialog id="editor" aria-labelledby="dialogTitle"><form id="editorForm"><header class="dialog-head"><div><p class="eyebrow" id="dialogEyebrow">ЛИЧНЫЙ ПОМОЩНИК</p><h2 id="dialogTitle"></h2></div><button type="button" class="icon-button" id="closeDialog" aria-label="Закрыть">×</button></header><div id="dialogFields"></div><p id="formError" class="error" role="alert"></p><div class="dialog-actions"><button type="button" class="button secondary" id="cancelDialog">Отмена</button><button type="submit" class="button" id="saveDialog">Сохранить</button></div></form></dialog>

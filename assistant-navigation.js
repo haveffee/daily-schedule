@@ -10,9 +10,9 @@
   const THRESHOLD = 76;
   const EDGE = 24;
   const MAX_DURATION = 1000;
-  const REPEAT_DELAY = 450;
-  const EASING = 'cubic-bezier(.22,1,.36,1)';
-  const DURATION = 460;
+  const EASING = 'cubic-bezier(.23,1,.32,1)';
+  const DURATION = 260;
+  const SNAPSHOT_BUDGET = 320;
 
   function route(value) {
     return String(value || '').replace(/^#\/?/, '').split(/[/?]/)[0];
@@ -31,15 +31,18 @@
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const elapsed = end.time - start.time;
-    if (elapsed < 0 || elapsed > MAX_DURATION || Math.abs(dx) < THRESHOLD || Math.abs(dx) < Math.abs(dy) * 1.7) return 0;
+    const flick = elapsed > 0 && elapsed <= 260 && Math.abs(dx) >= 32 && Math.abs(dx) / elapsed >= .5;
+    if (elapsed < 0 || elapsed > MAX_DURATION || (!flick && Math.abs(dx) < THRESHOLD) || Math.abs(dx) < Math.abs(dy) * 1.7) return 0;
     return dx < 0 ? 1 : -1;
   }
 
   // The page follows the finger directly, then gently resists a very long drag.
-  function displacement(dx, hasNeighbor) {
+  function displacement(dx, hasNeighbor, width = 390) {
     if (!Number.isFinite(dx)) return 0;
     const distance = Math.abs(dx);
-    const amount = hasNeighbor ? (distance <= 96 ? distance : 96 + 84 * (1 - Math.exp(-(distance - 96) / 126))) : 22 * (1 - Math.exp(-distance / 80));
+    const direct = Math.max(160, width * .8);
+    const resistance = Math.max(40, width * .15);
+    const amount = hasNeighbor ? (distance <= direct ? distance : direct + resistance * (1 - Math.exp(-(distance - direct) / resistance))) : 22 * (1 - Math.exp(-distance / 80));
     return Math.sign(dx) * amount;
   }
 
@@ -48,6 +51,7 @@
     const surface = options.root;
     const win = options.window || (typeof window !== 'undefined' ? window : null);
     const doc = options.document || (win && win.document);
+    const motionPreference = win && typeof win.matchMedia === 'function' ? win.matchMedia('(prefers-reduced-motion: reduce)') : null;
     const getRoute = typeof options.getRoute === 'function' ? options.getRoute : () => win && win.location && win.location.hash;
     const navigate = typeof options.navigate === 'function' ? options.navigate : function () {};
     const listeners = [];
@@ -60,13 +64,14 @@
     let dragOffset = 0;
     let scheduledOffset = 0;
     let initialized = false;
-    let lastNavigationAt = -Infinity;
+    let keyboardInput = false;
+    let capturedPointer = null;
 
     function media(query) {
       return !!(win && typeof win.matchMedia === 'function' && win.matchMedia(query).matches);
     }
 
-    function reduced() { return media('(prefers-reduced-motion: reduce)'); }
+    function reduced() { return !!(motionPreference && motionPreference.matches); }
     function mobile() { return media('(max-width: 800px)') && media('(pointer: coarse)'); }
     function later(callback, ms) { return win && typeof win.setTimeout === 'function' ? win.setTimeout(callback, ms) : null; }
     function clearLater(id) { if (id !== null && win && typeof win.clearTimeout === 'function') win.clearTimeout(id); }
@@ -115,6 +120,28 @@
       style(surface, 'transform', translate(dragOffset));
     }
 
+    // Read an interrupted compositor position before cancelling it. The next
+    // gesture starts at that pixel, rather than snapping the page back to zero.
+    function presentationOffset() {
+      if (!win || typeof win.getComputedStyle !== 'function') return dragOffset;
+      const value = win.getComputedStyle(surface).transform || '';
+      const matrix = value.match(/^matrix(3d)?\(([^)]+)\)$/);
+      if (matrix) {
+        const values = matrix[2].split(',').map(Number);
+        const offset = values[matrix[1] ? 12 : 4];
+        if (Number.isFinite(offset)) return offset;
+      }
+      const translate = value.match(/translate(?:3d|X)?\(\s*([-\d.]+)px/);
+      return translate && Number.isFinite(Number(translate[1])) ? Number(translate[1]) : dragOffset;
+    }
+
+    function releasePointer() {
+      if (capturedPointer !== null && surface && typeof surface.releasePointerCapture === 'function') {
+        try { surface.releasePointerCapture(capturedPointer); } catch (_) { /* The browser may already have released it. */ }
+      }
+      capturedPointer = null;
+    }
+
     function queueDrag(offset) {
       scheduledOffset = offset;
       if (frame !== null) return;
@@ -130,7 +157,7 @@
     }
 
     // Each motion has one cleanup path, including interrupted transitions and suspended tabs.
-    function motion(node, frames, duration, cssClass, finish) {
+    function motion(node, frames, duration, cssClass, finish, easing = EASING) {
       let animation = null;
       let timer = null;
       let done = false;
@@ -145,9 +172,12 @@
       };
       const complete = () => { if (done) return; cleanup(); finish(); };
       if (typeof node.animate === 'function') {
-        animation = node.animate(frames, { duration, easing: EASING, fill: 'both' });
-        animation.onfinish = complete;
-      } else {
+        try {
+          animation = node.animate(frames, { duration, easing, fill: 'both' });
+          animation.onfinish = complete;
+        } catch (_) { /* CSS and the cleanup deadline remain available. */ }
+      }
+      if (!animation) {
         node.addEventListener('animationend', end);
         node.classList.add(cssClass);
       }
@@ -185,7 +215,9 @@
 
     function settle() {
       if (returnMotion && !active && !pending) return;
+      const velocity = active && active.velocity || 0;
       active = null;
+      releasePointer();
       clearPending();
       cancelFrame();
       clearReturn();
@@ -193,11 +225,23 @@
       if (!surface || !surface.classList || !offset || reduced()) return resetDrag();
       surface.classList.remove('hvf-is-dragging');
       style(surface, '--hvf-drag-start', offset.toFixed(2) + 'px');
-      returnMotion = motion(surface, [{ transform: translate(offset) }, { transform: translate(0) }], 360, 'hvf-route-return', () => { returnMotion = null; resetDrag(); unstyle(surface, '--hvf-drag-start'); });
+      // Sample the duration .5 / bounce .2 spring once, then hand it to WAAPI.
+      // No per-frame JavaScript runs while the compositor settles the gesture.
+      const bounce = .2, seconds = .5;
+      const ratio = -Math.log(bounce) / Math.sqrt(Math.PI ** 2 + Math.log(bounce) ** 2);
+      const natural = -Math.log(.001) / (ratio * seconds);
+      const damped = natural * Math.sqrt(1 - ratio ** 2);
+      const frames = Array.from({ length: 31 }, (_, index) => {
+        const time = seconds * index / 30;
+        const position = Math.exp(-ratio * natural * time) * (offset * Math.cos(damped * time) + (velocity * 1000 + ratio * natural * offset) / damped * Math.sin(damped * time));
+        return { transform: translate(index === 30 ? 0 : position), offset: index / 30 };
+      });
+      returnMotion = motion(surface, frames, 500, 'hvf-route-return', () => { returnMotion = null; resetDrag(); unstyle(surface, '--hvf-drag-start'); }, 'linear');
     }
 
     function cancel() {
       active = null;
+      releasePointer();
       clearPending();
       clearReturn();
       finishScene();
@@ -206,20 +250,22 @@
     }
 
     function begin(event, contact, id) {
-      if (active || pending) settle();
+      if (active || pending) return;
       if (blocked() || ignored(event.target)) return;
       const from = route(getRoute());
       if (!ROUTES.includes(from)) return;
       const width = Number(win.innerWidth) || (doc && doc.documentElement && doc.documentElement.clientWidth) || 0;
       const start = point(event, contact);
-      if (!width || start.x <= EDGE || start.x >= width - EDGE || start.time - lastNavigationAt < REPEAT_DELAY) return;
+      if (!width || start.x <= EDGE || start.x >= width - EDGE) return;
+      const origin = reduced() ? 0 : returnMotion || scene ? presentationOffset() : dragOffset;
       clearReturn();
       finishScene();
       resetDrag();
-      active = { ...start, id, from, locked: false };
+      if (origin) paintDrag(origin);
+      active = { ...start, id, from, origin, last: start, velocity: 0, locked: false };
     }
 
-    function offsetFor(from, dx) { return displacement(dx, !!neighbor(from, dx < 0 ? 1 : -1)); }
+    function offsetFor(from, dx) { return displacement(dx, !!neighbor(from, dx < 0 ? 1 : -1), Number(win && win.innerWidth) || 390); }
 
     function move(event, contact) {
       if (!active) return;
@@ -231,8 +277,14 @@
         active.locked = true;
         surface.classList.remove('view-enter');
         surface.classList.add('hvf-is-dragging');
+        if (win.PointerEvent && typeof surface.setPointerCapture === 'function') {
+          try { surface.setPointerCapture(active.id); capturedPointer = active.id; } catch (_) { /* Window listeners retain the fallback. */ }
+        }
       }
-      if (active.locked) queueDrag(offsetFor(active.from, dx));
+      const interval = next.time - active.last.time;
+      if (interval > 0) active.velocity = (next.x - active.last.x) / interval;
+      active.last = next;
+      if (active.locked) queueDrag(active.origin + offsetFor(active.from, dx));
     }
 
     function finish(event, contact) {
@@ -241,12 +293,16 @@
       const end = point(event, contact);
       const direction = gesture(start, end);
       const next = neighbor(start.from, direction);
-      if (!next || end.time - lastNavigationAt < REPEAT_DELAY) return settle();
+      if (end.time - start.last.time > 100) start.velocity = 0;
+      // Reversing the finger at release means keep this section, even if an
+      // earlier part of the drag happened to cross the distance threshold.
+      if (direction && start.velocity * direction > .35) return settle();
+      if (!next) return settle();
       active = null;
+      releasePointer();
       cancelFrame();
-      paintDrag(offsetFor(start.from, end.x - start.x));
-      lastNavigationAt = end.time;
-      pending = { from: start.from, to: next, offset: dragOffset, timer: null };
+      paintDrag(start.origin + offsetFor(start.from, end.x - start.x));
+      pending = { from: start.from, to: next, offset: dragOffset, velocity: start.velocity, timer: null };
       pending.timer = later(() => { if (pending) settle(); }, 650);
       // Keep the last finger position until the synchronous render captures it.
       try { navigate(next); } catch (error) { settle(); throw error; }
@@ -266,6 +322,8 @@
       if (initialized || !surface || !win || typeof surface.addEventListener !== 'function') return;
       initialized = true;
       updateSurfaceRoute(getRoute());
+      listen(win, 'keydown', event => { if (['Enter', ' ', 'Spacebar'].includes(event.key)) keyboardInput = true; });
+      listen(win, 'pointerdown', () => { keyboardInput = false; });
       if (win.PointerEvent) {
         listen(surface, 'pointerdown', event => {
           if (event.pointerType !== 'touch') return;
@@ -278,6 +336,7 @@
         listen(win, 'pointercancel', settle);
       } else {
         listen(surface, 'touchstart', event => {
+          keyboardInput = false;
           if (!event.touches || event.touches.length !== 1) return settle();
           begin(event, event.touches[0], event.touches[0].identifier);
         });
@@ -301,12 +360,17 @@
       listen(win, 'blur', cancel);
       listen(win, 'resize', cancel);
       if (doc && typeof doc.addEventListener === 'function') listen(doc, 'visibilitychange', cancel);
+      if (motionPreference && typeof motionPreference.addEventListener === 'function') listen(motionPreference, 'change', () => { if (reduced()) cancel(); });
     }
 
     // The outgoing scene is transient and inert. Strip identifiers and action hooks so
     // background form queries and delegated events can never treat it as live UI.
     function snapshot(content, offset) {
       if (!doc || !doc.body || typeof doc.createElement !== 'function' || typeof content.cloneNode !== 'function' || typeof content.getBoundingClientRect !== 'function') return null;
+      // Do not duplicate a long financial history or a busy dashboard just for
+      // decoration. Those routes use the cheap incoming layer on their own.
+      const descendants = typeof content.getElementsByTagName === 'function' ? content.getElementsByTagName('*') : content.querySelectorAll('*');
+      if (descendants.length > SNAPSHOT_BUDGET) return null;
       const rect = content.getBoundingClientRect();
       let opacity = '1';
       if (scene && scene.content === content && win && typeof win.getComputedStyle === 'function') {
@@ -370,13 +434,15 @@
       discardPrepared();
       if (!content || !content.classList || !previous || (previous === next && !refresh)) return false;
       const offset = refresh ? 0 : pending && pending.from === previous && pending.to === next ? pending.offset : dragOffset;
-      const image = reduced() ? null : snapshot(content, offset);
+      const handoff = !refresh && pending && pending.from === previous && pending.to === next ? { velocity: pending.velocity } : null;
+      const image = reduced() || keyboardInput || refresh ? null : snapshot(content, offset);
       active = null;
+      releasePointer();
       clearPending();
       clearReturn();
       finishScene();
       resetDrag();
-      prepared = { content, from: previous, to: next, offset, snapshot: image, refresh };
+      prepared = { content, from: previous, to: next, offset, snapshot: image, refresh, handoff };
       return !!image;
     }
 
@@ -393,7 +459,7 @@
       content.classList.remove('view-enter', 'hvf-route-enter');
       // The old scene is fixed to its original viewport; scrolling never teleports it.
       if (!refresh && win && typeof win.scrollTo === 'function') win.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-      if (reduced()) {
+      if (reduced() || keyboardInput) {
         if (captured && captured.snapshot) captured.snapshot.remove();
         return false;
       }
@@ -402,11 +468,13 @@
       const requestedDirection = intent && intent.direction;
       const direction = refresh ? (requestedDirection === -1 || requestedDirection === 1 ? requestedDirection : 0) : oldIndex >= 0 && newIndex >= 0 ? Math.sign(newIndex - oldIndex) : 0;
       const width = Number(win && win.innerWidth) || 390;
-      const duration = refresh ? 340 : DURATION;
-      const opacity = refresh ? 0.3 : 0.08;
-      const start = direction * Math.min(refresh ? 20 : 72, width * 0.18);
+      const handoff = captured && captured.handoff && captured.snapshot;
+      const velocity = captured && captured.handoff ? Math.abs(captured.handoff.velocity) : 0;
+      const duration = refresh ? 160 : handoff && velocity > 0 ? Math.max(180, Math.min(DURATION, (width - Math.abs(captured.offset)) / velocity)) : DURATION;
+      const opacity = handoff ? 1 : refresh ? .78 : .72;
+      const start = refresh ? 0 : handoff ? direction * width + captured.offset : direction * 24;
       const oldStart = captured ? captured.offset : 0;
-      const oldEnd = -direction * (refresh ? 16 : oldStart ? Math.min(280, Math.max(Math.abs(oldStart) + 72, width * 0.52)) : 56);
+      const oldEnd = -direction * (handoff ? width : 24);
       const current = { content, snapshot: captured && captured.snapshot, cleanups: [] };
       scene = current;
       style(content, '--hvf-route-start', start.toFixed(2) + 'px');

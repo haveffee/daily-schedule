@@ -37,7 +37,7 @@ jobs:
 
       - name: Check JavaScript and regression tests
         run: |
-          for file in app-config.js assistant-billing.js assistant-core.js assistant-forecast.js assistant-categories.js assistant-backup.js assistant-planner.js assistant-weekly.js assistant-navigation.js assistant-motion.js assistant-ui.js assistant-focus.js assistant-limits.js assistant-store.js assistant-extras.js assistant-reminders.js reminders-config.js pwa.js service-worker.js backend/reminders/worker.mjs backend/reminders/scripts/generate-vapid.mjs backend/billing/worker.mjs backend/app/worker.mjs scripts/build-public.mjs; do
+          for file in app-config.js assistant-guide.js assistant-billing.js assistant-core.js assistant-forecast.js assistant-categories.js assistant-backup.js assistant-planner.js assistant-weekly.js assistant-navigation.js assistant-motion.js assistant-ui.js assistant-focus.js assistant-limits.js assistant-store.js assistant-extras.js assistant-reminders.js reminders-config.js pwa.js service-worker.js backend/reminders/worker.mjs backend/reminders/scripts/generate-vapid.mjs backend/billing/worker.mjs backend/app/worker.mjs scripts/build-public.mjs; do
             node --check "$file"
           done
           node --test tests/*.test.cjs

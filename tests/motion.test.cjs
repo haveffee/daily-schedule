@@ -95,15 +95,24 @@ test('disabled buttons and secondary pointers never acquire press feedback', () 
   assert.equal(button.classList.contains('hvf-pressed'), false);
 });
 
-test('keyboard feedback leaves Enter and Space native behavior untouched', () => {
+test('keyboard interaction stays instant with native focus and no decorative press or modal delays', () => {
   const ui = setup();
   const button = element('BUTTON');
   assert.equal(ui.doc.emit('keydown', { target: button, key: 'Enter' }), false);
-  assert.equal(button.classList.contains('hvf-pressed'), true);
+  assert.equal(button.classList.contains('hvf-pressed'), false);
   assert.equal(ui.doc.emit('keyup', { target: button, key: 'Enter' }), false);
   assert.equal(button.classList.contains('hvf-pressed'), false);
   ui.doc.emit('keydown', { target: button, key: ' ', repeat: true });
   assert.equal(button.classList.contains('hvf-pressed'), false);
+  const dialog = element('DIALOG');
+  ui.controller.open(dialog);
+  assert.equal(dialog.animations.length, 0);
+  ui.controller.close(dialog);
+  assert.equal(dialog.open, false);
+  assert.equal(ui.timers.size, 0);
+  ui.doc.emit('pointerdown', { target: button, pointerId: 1 });
+  ui.controller.open(dialog);
+  assert.equal(dialog.animations.length, 1, 'pointer interaction restores the ordinary modal feedback');
 });
 
 test('backup labels receive pointer feedback without acquiring invented keyboard actions', () => {
@@ -143,17 +152,37 @@ test('opening a modal shows it synchronously and cleans its compositor animation
   assert.equal(ui.timers.size, 0);
 });
 
-test('onboarding steps animate only the form, without calling showModal twice', () => {
+test('onboarding steps animate only the form after entry, without calling showModal twice', async () => {
   const ui = setup();
   const dialog = element('DIALOG');
   const fields = element();
   dialog.querySelector = selector => selector === '#dialogFields' ? fields : null;
   ui.controller.open(dialog);
+  dialog.animations[0].complete();
+  await Promise.resolve();
   ui.controller.open(dialog);
   assert.equal(dialog.shows, 1);
   assert.equal(dialog.animations.length, 1);
   assert.equal(dialog.animations[0].cancelled, true);
   assert.equal(fields.animations.length, 1);
+});
+
+test('advancing onboarding before entry finishes retargets the visible whole dialog without a jump', () => {
+  const ui = setup();
+  const dialog = element('DIALOG');
+  const fields = element();
+  dialog.querySelector = () => fields;
+  ui.controller.open(dialog);
+  ui.win.getComputedStyle = target => {
+    assert.equal(target, dialog);
+    assert.equal(dialog.animations[0].cancelled, false);
+    return { opacity: '0.65', transform: 'matrix(.985,0,0,.985,0,5)' };
+  };
+  ui.controller.open(dialog);
+  assert.equal(dialog.shows, 1);
+  assert.equal(dialog.animations.length, 2);
+  assert.equal(fields.animations.length, 0);
+  assert.deepEqual(dialog.animations[1].frames[0], { opacity: .65, transform: 'matrix(.985,0,0,.985,0,5)' });
 });
 
 test('deliberate modal dismissal defers native close, then invokes cleanup once', async () => {

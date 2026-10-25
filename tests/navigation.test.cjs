@@ -58,11 +58,12 @@ function setup(options = {}) {
   let nextId = 1;
   const frames = new Map();
   const timers = new Map();
+  const preference = Object.assign(eventTarget(), { matches: !!options.reduced });
   const visits = [];
   const scrolls = [];
   const win = Object.assign(eventTarget(), {
     innerWidth: 390, innerHeight: 844, PointerEvent: options.touchFallback ? undefined : function () {}, document: doc,
-    matchMedia: query => ({ matches: query.includes('reduced-motion') ? !!options.reduced : !options.desktop }),
+    matchMedia: query => query.includes('reduced-motion') ? preference : { matches: !options.desktop },
     getSelection: () => ({ isCollapsed: !selection, toString: () => selection }),
     getComputedStyle: item => ({ overflowX: item.overflowX || 'visible' }),
     requestAnimationFrame: callback => { const id = nextId++; frames.set(id, callback); return id; },
@@ -83,7 +84,7 @@ function setup(options = {}) {
   }
   function flushFrame() { const callbacks = Array.from(frames.values()); frames.clear(); callbacks.forEach(callback => callback(16)); }
   function runTimers(ms = Infinity) { Array.from(timers).forEach(([id, item]) => { if (item.ms <= ms && timers.delete(id)) item.callback(); }); }
-  return { surface, doc, win, controller, visits, pointer, swipe, scrolls, flushFrame, runTimers, frames, timers, setRoute: value => { current = value; }, select: value => { selection = value; } };
+  return { surface, doc, win, controller, visits, pointer, swipe, scrolls, flushFrame, runTimers, frames, timers, preference, setRoute: value => { current = value; }, select: value => { selection = value; } };
 }
 
 test('only ordered main sections are adjacent, and date-specific day routes normalize', () => {
@@ -100,7 +101,9 @@ test('gesture intent rejects taps, diagonal scrolling, stale drags, and invalid 
   const start = { x: 250, y: 200, time: 100 };
   assert.equal(navigation.gesture(start, { x: 100, y: 220, time: 900 }), 1);
   assert.equal(navigation.gesture(start, { x: 350, y: 200, time: 900 }), -1);
-  assert.equal(navigation.gesture(start, { x: 200, y: 200, time: 200 }), 0);
+  assert.equal(navigation.gesture(start, { x: 200, y: 200, time: 300 }), 0);
+  assert.equal(navigation.gesture(start, { x: 212, y: 200, time: 160 }), 1, 'a short deliberate flick has enough velocity');
+  assert.equal(navigation.gesture(start, { x: 228, y: 200, time: 120 }), 0, 'a tiny movement remains a tap even at high velocity');
   assert.equal(navigation.gesture(start, { x: 100, y: 310, time: 200 }), 0);
   assert.equal(navigation.gesture(start, { x: 100, y: 200, time: 1400 }), 0);
   assert.equal(navigation.gesture(start, { x: 100, y: 200, time: 50 }), 0);
@@ -112,6 +115,8 @@ test('touch navigation advances once and accepts deliberate reverse swipes after
   ui.swipe();
   assert.deepEqual(ui.visits, ['goals']);
   ui.pointer('pointerup', 120, 208, 260);
+  ui.controller.prepare(ui.surface, 'day', 'goals');
+  ui.controller.enter(ui.surface, 'day', 'goals');
   ui.swipe(120, 280, 800);
   assert.deepEqual(ui.visits, ['goals', 'day']);
 });
@@ -248,7 +253,7 @@ test('explicit section entry animates in direction without forcing a layout or r
   assert.equal(ui.scrolls.length, 2, 'same section refresh must not reset scrolling');
 });
 
-test('intentional same-section refresh captures a clipped inert scene and preserves native scrolling', () => {
+test('frequent same-section refreshes avoid cloning the page and preserve native scrolling', () => {
   const ui = setup({ dom: true });
   const intent = { refresh: true, direction: 1 };
   ui.surface.setAttribute('id', 'content');
@@ -256,26 +261,20 @@ test('intentional same-section refresh captures a clipped inert scene and preser
   action.setAttribute('id', 'nextDay');
   action.setAttribute('data-action', 'next-day');
   ui.surface.appendChild(action);
-  assert.equal(ui.controller.prepare(ui.surface, '#day/2026-10-25', '#day/2026-10-26', intent), true);
-  const snapshot = ui.doc.body.children[0];
-  assert.equal(snapshot.inert, true);
-  assert.equal(snapshot.style.getPropertyValue('top'), '0px');
-  assert.equal(snapshot.children[0].style.getPropertyValue('top'), '-240px');
-  assert.equal(snapshot.children[0].getAttribute('id'), null);
-  assert.equal(snapshot.children[0].children[0].getAttribute('data-action'), null);
+  ui.surface.cloneNode = () => { throw new Error('A date change must not duplicate a long task list'); };
+  assert.equal(ui.controller.prepare(ui.surface, '#day/2026-10-25', '#day/2026-10-26', intent), false);
+  assert.equal(ui.doc.body.children.length, 0);
   assert.equal(ui.controller.enter(ui.surface, '#day/2026-10-25', '#day/2026-10-26', intent), true);
   assert.equal(ui.scrolls.length, 0, 'day, month, and filter changes never force the page to the top');
-  assert.equal(ui.surface.style.getPropertyValue('--hvf-route-start'), '20.00px');
-  assert.equal(ui.surface.style.getPropertyValue('--hvf-route-duration'), '340ms');
-  assert.equal(snapshot.style.getPropertyValue('--hvf-route-duration'), '340ms');
-  assert.equal(snapshot.style.getPropertyValue('--hvf-old-end'), '-16.00px');
+  assert.equal(ui.surface.style.getPropertyValue('--hvf-route-start'), '0.00px');
+  assert.equal(ui.surface.style.getPropertyValue('--hvf-route-duration'), '160ms');
   ui.surface.emit('animationend');
   assert.equal(ui.doc.body.children.length, 0);
   assert.equal(ui.surface.style.getPropertyValue('--hvf-route-opacity'), '');
   assert.equal(ui.timers.size, 0);
 });
 
-test('refresh direction is explicit and neutral filters crossfade without spatial movement', () => {
+test('date, month, currency and filter changes use one subtle opacity layer without moving readable data', () => {
   for (const direction of [-1, 0, 1, undefined, 100]) {
     const ui = setup({ dom: true });
     const intent = { refresh: true, direction };
@@ -286,9 +285,10 @@ test('refresh direction is explicit and neutral filters crossfade without spatia
     };
     ui.controller.prepare(ui.surface, 'money', 'money', intent);
     ui.controller.enter(ui.surface, 'money', 'money', intent);
-    const start = direction === -1 ? '-20.00px' : direction === 1 ? '20.00px' : '0.00px';
-    assert.equal(ui.surface.style.getPropertyValue('--hvf-route-start'), start);
-    assert.equal(frames[0].options.duration, 340);
+    assert.equal(ui.surface.style.getPropertyValue('--hvf-route-start'), '0.00px');
+    assert.equal(frames[0].options.duration, 160);
+    assert.equal(frames[0].keyframes[0].transform, frames[0].keyframes[1].transform);
+    assert.ok(frames[0].keyframes[0].opacity >= .75, 'functional content never disappears into a white frame');
     assert.deepEqual(Object.keys(frames[0].keyframes[0]).sort(), ['opacity', 'transform']);
     assert.equal(ui.scrolls.length, 0);
     ui.controller.cancel();
@@ -307,13 +307,14 @@ test('ordinary same-route store acknowledgements do not create snapshots or anim
   assert.equal(ui.scrolls.length, 0);
 });
 
-test('rapid deliberate refreshes retain one snapshot and account cancellation removes it synchronously', () => {
+test('rapid deliberate refreshes keep a single incoming motion and account cancellation removes it synchronously', () => {
   const ui = setup({ dom: true });
   for (const direction of [1, -1, 0, 1]) {
     const intent = { refresh: true, direction };
     ui.controller.prepare(ui.surface, 'day', 'day', intent);
     ui.controller.enter(ui.surface, 'day', 'day', intent);
-    assert.equal(ui.doc.body.children.length, 1);
+    assert.equal(ui.doc.body.children.length, 0);
+    assert.equal(ui.timers.size, 1);
     assert.equal(ui.scrolls.length, 0);
   }
   ui.controller.cancel();
@@ -346,7 +347,8 @@ test('one animation frame coalesces finger positions and movement stays bounded'
   ui.flushFrame();
   assert.equal(ui.surface.style.getPropertyValue('transform'), 'translate3d(-60.00px,0,0)');
   assert.equal(navigation.displacement(40, true), 40);
-  assert.ok(navigation.displacement(100000, true) <= 180);
+  assert.equal(navigation.displacement(220, true), 220, 'normal navigation follows the finger one to one');
+  assert.ok(navigation.displacement(100000, true) <= 390 * .95);
   assert.ok(navigation.displacement(100000, false) <= 22);
   assert.ok(navigation.displacement(-100000, false) >= -22);
 });
@@ -368,6 +370,71 @@ test('an incomplete swipe and an edge resistance settle to rest without navigati
   }
 });
 
+test('horizontal lock captures one pointer and releases it without touching native vertical scrolling', () => {
+  const ui = setup();
+  const captures = [], releases = [];
+  ui.surface.setPointerCapture = id => captures.push(id);
+  ui.surface.releasePointerCapture = id => releases.push(id);
+  ui.pointer('pointerdown', 260, 200, 0);
+  ui.pointer('pointermove', 256, 205, 20);
+  assert.deepEqual(captures, []);
+  ui.pointer('pointermove', 200, 208, 100);
+  assert.deepEqual(captures, [1]);
+  ui.pointer('pointermove', 170, 208, 150);
+  assert.deepEqual(captures, [1], 'pointer capture is not repeated every frame');
+  ui.pointer('pointerup', 170, 208, 200);
+  assert.deepEqual(releases, [1]);
+  const vertical = setup();
+  vertical.surface.setPointerCapture = () => { throw new Error('Vertical scrolling belongs to the browser'); };
+  vertical.pointer('pointerdown', 220, 200, 0);
+  vertical.pointer('pointermove', 215, 250, 50);
+  assert.equal(vertical.controller.getState().dragging, false);
+});
+
+test('a short quick flick navigates but a last-moment reversal returns to the current section', () => {
+  const flick = setup();
+  flick.pointer('pointerdown', 240, 200, 0);
+  flick.pointer('pointermove', 202, 201, 50);
+  flick.pointer('pointerup', 200, 201, 65);
+  assert.deepEqual(flick.visits, ['goals']);
+  const reverse = setup();
+  reverse.pointer('pointerdown', 280, 200, 0);
+  reverse.pointer('pointermove', 120, 200, 130);
+  reverse.pointer('pointermove', 175, 200, 180);
+  reverse.flushFrame();
+  reverse.pointer('pointerup', 175, 200, 190);
+  assert.deepEqual(reverse.visits, []);
+  assert.equal(reverse.controller.getState().transitioning, true);
+});
+
+test('an interrupted return starts the next drag at the visible compositor position', () => {
+  const ui = setup();
+  const motions = [];
+  ui.surface.animate = (frames, options) => {
+    const item = { frames, options, cancelled: false, cancel() { this.cancelled = true; } };
+    motions.push(item);
+    return item;
+  };
+  ui.pointer('pointerdown', 180, 200, 0);
+  ui.pointer('pointermove', 220, 200, 70);
+  ui.flushFrame();
+  ui.pointer('pointerup', 220, 200, 130);
+  assert.equal(motions[0].options.easing, 'linear');
+  assert.equal(motions[0].options.duration, 500);
+  assert.ok(motions[0].frames.length > 2, 'a sampled spring is handed to the compositor');
+  assert.equal(motions[0].frames.at(-1).transform, 'translate3d(0.00px,0,0)');
+  ui.win.getComputedStyle = () => {
+    assert.equal(motions[0].cancelled, false, 'read the current visual frame before cancelling it');
+    return { transform: 'matrix(1, 0, 0, 1, 14, 0)' };
+  };
+  ui.pointer('pointerdown', 220, 200, 160);
+  assert.equal(ui.surface.style.getPropertyValue('transform'), 'translate3d(14.00px,0,0)');
+  assert.equal(motions[0].cancelled, true);
+  ui.pointer('pointermove', 200, 200, 210);
+  ui.flushFrame();
+  assert.equal(ui.surface.style.getPropertyValue('transform'), 'translate3d(-6.00px,0,0)');
+});
+
 test('a committed swipe holds its last painted position until prepare captures the old scene', () => {
   const ui = setup({ dom: true });
   ui.swipe();
@@ -382,10 +449,60 @@ test('a committed swipe holds its last painted position until prepare captures t
   assert.ok(Math.abs(parseFloat(snapshot.style.getPropertyValue('left'))) < 0.01);
   assert.equal(ui.surface.style.getPropertyValue('transform'), '');
   ui.controller.enter(ui.surface, 'day', 'goals');
+  assert.equal(ui.surface.style.getPropertyValue('--hvf-route-start'), '230.00px', 'the incoming page starts one viewport beyond the finger offset');
+  assert.equal(ui.surface.style.getPropertyValue('--hvf-route-opacity'), '1', 'a swipe keeps the adjacent page solid');
+  assert.equal(snapshot.style.getPropertyValue('--hvf-old-end'), '-390.00px');
   assert.equal(ui.controller.getState().pending, false);
   assert.equal(snapshot.classList.contains('hvf-css-leave'), true);
   ui.surface.emit('animationend');
   assert.equal(ui.doc.body.children.length, 0);
+});
+
+test('a deliberate next swipe can interrupt the previous page entry without a fixed cooldown', () => {
+  const ui = setup({ dom: true });
+  ui.swipe();
+  ui.controller.prepare(ui.surface, 'day', 'goals');
+  ui.controller.enter(ui.surface, 'day', 'goals');
+  assert.equal(ui.controller.getState().transitioning, true);
+  ui.swipe(280, 120, 300);
+  assert.deepEqual(ui.visits, ['goals', 'money']);
+  assert.equal(ui.doc.body.children.length, 0, 'the interrupted old scene is removed before the new drag');
+});
+
+test('large pages avoid a cloned layer and use the same bounded incoming fallback', () => {
+  const ui = setup({ dom: true });
+  for (let index = 0; index < 321; index++) ui.surface.appendChild(element('article'));
+  ui.surface.cloneNode = () => { throw new Error('Never duplicate an unbounded history for an animation'); };
+  assert.equal(ui.controller.prepare(ui.surface, 'money', 'day'), false);
+  assert.equal(ui.doc.body.children.length, 0);
+  assert.equal(ui.surface.children.length, 321);
+  assert.equal(ui.controller.enter(ui.surface, 'money', 'day'), true);
+  assert.equal(ui.surface.style.getPropertyValue('--hvf-route-start'), '-24.00px');
+  assert.ok(Number(ui.surface.style.getPropertyValue('--hvf-route-opacity')) >= .7);
+});
+
+test('keyboard navigation skips decoration and pointer navigation restores it', () => {
+  const ui = setup({ dom: true });
+  ui.win.emit('keydown', { key: 'Enter' });
+  assert.equal(ui.controller.prepare(ui.surface, 'day', 'goals'), false);
+  assert.equal(ui.controller.enter(ui.surface, 'day', 'goals'), false);
+  assert.equal(ui.doc.body.children.length, 0);
+  assert.equal(ui.timers.size, 0);
+  ui.win.emit('pointerdown', { pointerType: 'mouse', isPrimary: true });
+  assert.equal(ui.controller.prepare(ui.surface, 'goals', 'day'), true);
+  assert.equal(ui.controller.enter(ui.surface, 'goals', 'day'), true);
+});
+
+test('changing reduced motion clears active compositor scenes immediately', () => {
+  const ui = setup({ dom: true });
+  ui.controller.prepare(ui.surface, 'day', 'goals');
+  ui.controller.enter(ui.surface, 'day', 'goals');
+  ui.preference.matches = true;
+  ui.preference.emit('change');
+  assert.equal(ui.doc.body.children.length, 0);
+  assert.equal(ui.timers.size, 0);
+  assert.equal(ui.controller.getState().transitioning, false);
+  assert.equal(ui.surface.style.getPropertyValue('transform'), '');
 });
 
 test('outgoing scene is clipped, inert and detached from forms, actions and identifiers', () => {

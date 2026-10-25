@@ -6,7 +6,7 @@
   'use strict';
 
   const CONTROL = 'button,a[href],summary,[role="button"],.backup-file-label,input[type="checkbox"],input[type="radio"]';
-  const EASE = 'cubic-bezier(.22,1,.36,1)';
+  const EASE = 'cubic-bezier(.23,1,.32,1)';
 
   // Feedback never postpones a click or a model write. The only deferred native
   // action is closing a dialog deliberately dismissed by the user.
@@ -25,9 +25,10 @@
     const preference = win && typeof win.matchMedia === 'function' ? win.matchMedia('(prefers-reduced-motion: reduce)') : null;
     let initialized = false;
     let destroyed = false;
+    let keyboardInput = false;
 
     function reduced() { return !!(preference && preference.matches); }
-    function quiet() { return reduced() || !!(doc && doc.visibilityState === 'hidden'); }
+    function quiet() { return keyboardInput || reduced() || !!(doc && doc.visibilityState === 'hidden'); }
     function classAdd(element, name) { if (element && element.classList) element.classList.add(name); }
     function classRemove(element, name) { if (element && element.classList) element.classList.remove(name); }
     function listen(target, type, callback, settings) {
@@ -83,6 +84,7 @@
       for (const key of Array.from(pressed.keys())) release(key);
     }
     function onDown(event) {
+      keyboardInput = false;
       if (quiet() || event.isPrimary === false || (event.button !== undefined && event.button !== 0)) return;
       const element = control(event.target);
       if (!element) return;
@@ -98,16 +100,10 @@
     }
     function onUp(event) { release(event.pointerId === undefined ? 1 : event.pointerId); }
     function onKeyDown(event) {
-      if (event.repeat || quiet() || !['Enter', ' ', 'Spacebar'].includes(event.key)) return;
-      const element = control(event.target);
-      if (!element) return;
-      if (String(element.tagName).toLowerCase() === 'label') return;
-      const key = 'key:' + event.key;
-      release(key);
-      pressed.set(key, { element });
-      classAdd(element, 'hvf-pressed');
+      if (!['Enter', ' ', 'Spacebar', 'Escape'].includes(event.key)) return;
+      keyboardInput = true;
+      releaseAll();
     }
-    function onKeyUp(event) { release('key:' + event.key); }
 
     function currentDialogFrame(dialog) {
       const frame = { opacity: 1, transform: 'translateY(0) scale(1)' };
@@ -127,12 +123,13 @@
     }
     function trackDialog(dialog) {
       if (dialogs.has(dialog)) return dialogs.get(dialog);
-      const state = { generation: 0, run: null, closing: false, complete: null, ownsInert: false, previousInert: false };
+      const state = { generation: 0, run: null, target: null, closing: false, complete: null, ownsInert: false, previousInert: false };
       dialogs.set(dialog, state);
       listen(dialog, 'close', () => {
         state.generation += 1;
         if (state.run) state.run.cancel();
         state.run = null;
+        state.target = null;
         state.closing = false;
         state.complete = null;
         restoreDialogInert(dialog, state);
@@ -144,9 +141,10 @@
       if (!dialog || typeof dialog.showModal !== 'function') return;
       const state = trackDialog(dialog);
       const wasOpen = !!dialog.open;
-      const reopening = wasOpen && state.closing;
+      const reopening = wasOpen && (state.closing || !!state.run && state.target === dialog);
+      const stage = wasOpen && !reopening && typeof dialog.querySelector === 'function' ? dialog.querySelector('#dialogFields') : null;
       // Read the current compositor frame before cancelling its animation.
-      const resumeFrame = reopening && !quiet() ? currentDialogFrame(dialog) : null;
+      const resumeFrame = !quiet() && (reopening || stage && state.run && state.target === stage) ? currentDialogFrame(reopening ? dialog : stage) : null;
       state.generation += 1;
       if (state.run) state.run.cancel();
       restoreDialogInert(dialog, state);
@@ -157,13 +155,13 @@
       classAdd(dialog, 'hvf-dialog-motion');
       if (!wasOpen) dialog.showModal();
       // Stepping through onboarding keeps the same dialog in place.
-      const stage = wasOpen && !reopening && typeof dialog.querySelector === 'function' ? dialog.querySelector('#dialogFields') : null;
       const generation = state.generation;
+      state.target = stage || dialog;
       state.run = animate(stage || dialog, stage ? [
-        { opacity: .6, transform: 'translateY(7px)' }, { opacity: 1, transform: 'translateY(0)' }
+        resumeFrame || { opacity: .78, transform: 'translateY(4px)' }, { opacity: 1, transform: 'translateY(0)' }
       ] : [
-        resumeFrame || { opacity: 0, transform: 'translateY(22px) scale(.975)' }, { opacity: 1, transform: 'translateY(0) scale(1)' }
-      ], stage ? 230 : 340, () => { if (state.generation === generation) state.run = null; });
+        resumeFrame || { opacity: 0, transform: 'translateY(12px) scale(.975)' }, { opacity: 1, transform: 'translateY(0) scale(1)' }
+      ], stage ? 160 : 240, () => { if (state.generation === generation) { state.run = null; state.target = null; } });
     }
     function close(dialog, settings) {
       settings = settings || {};
@@ -176,6 +174,7 @@
       if (state.run) state.run.cancel();
       restoreDialogInert(dialog, state);
       state.run = null;
+      state.target = null;
       state.closing = true;
       state.complete = typeof settings.onClosed === 'function' ? settings.onClosed : null;
       function finish() {
@@ -196,7 +195,7 @@
       classAdd(dialog, 'hvf-dialog-exiting');
       state.run = animate(dialog, [
         fromFrame || { opacity: 1, transform: 'translateY(0) scale(1)' }, { opacity: 0, transform: 'translateY(12px) scale(.985)' }
-      ], 170, finish);
+      ], 160, finish);
       return true;
     }
 
@@ -228,7 +227,7 @@
       element.style.overflow = 'hidden';
       const state = { nextOpen, overflow, run: null };
       details.set(element, state);
-      state.run = animate(element, [{ height: from + 'px' }, { height: to + 'px' }], nextOpen ? 320 : 240, () => {
+      state.run = animate(element, [{ height: from + 'px' }, { height: to + 'px' }], 200, () => {
         if (details.get(element) !== state) return;
         element.open = nextOpen;
         element.style.overflow = overflow;
@@ -250,7 +249,6 @@
       listen(doc, 'pointerup', onUp, { capture: true, passive: true });
       listen(doc, 'pointercancel', onUp, { capture: true, passive: true });
       listen(surface, 'keydown', onKeyDown, true);
-      listen(doc, 'keyup', onKeyUp, true);
       listen(surface, 'click', toggleDetails);
       listen(win, 'blur', releaseAll);
       listen(doc, 'visibilitychange', () => { if (doc.visibilityState === 'hidden') settle(); });

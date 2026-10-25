@@ -149,7 +149,7 @@ test('installation precaches a complete public shell under the project path only
   const sw = worker();
   await sw.lifecycle('install');
   const urls = sw.requests.map(request => request.url);
-  assert.equal(urls.length, 41);
+  assert.equal(urls.length, 43);
   for (const request of sw.requests) {
     assert.ok(request.url.startsWith(SCOPE));
     assert.equal(request.cache, 'reload');
@@ -189,7 +189,7 @@ test('deployment and validation include the same shell and load the new modules 
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   const ui = html.indexOf('./assistant-ui.js');
   assert.ok(ui > 0);
-  for (const name of ['categories', 'forecast', 'backup', 'focus', 'limits', 'navigation', 'motion', 'billing']) {
+  for (const name of ['categories', 'forecast', 'backup', 'focus', 'limits', 'navigation', 'motion', 'guide', 'billing']) {
     const moduleIndex = html.indexOf('./assistant-' + name + '.js');
     assert.ok(moduleIndex > 0 && moduleIndex < ui, name + ' module loads before UI');
     assert.match(workflow, new RegExp('for file in [^\\n]*assistant-' + name + '\\.js'));
@@ -209,7 +209,7 @@ test('root hosting keeps offline files, notification icons and reminder routes o
   const scope = 'https://hvf.example.workers.dev/';
   const sw = worker({ scope });
   await sw.lifecycle('install');
-  assert.equal(sw.requests.length, 41);
+  assert.equal(sw.requests.length, 43);
   assert.ok(sw.requests.every(request => request.url.startsWith(scope)));
   sw.setNetwork(async () => { throw new Error('offline'); });
   assert.match(await (await sw.fetch('./', { mode: 'navigate' })).text(), /online:/);

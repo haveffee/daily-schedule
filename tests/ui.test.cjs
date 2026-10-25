@@ -14,6 +14,7 @@ const navigation = require('../assistant-navigation.js');
 const motion = require('../assistant-motion.js');
 const limits = require('../assistant-limits.js');
 const focusModule = require('../assistant-focus.js');
+const guideModule = require('../assistant-guide.js');
 
 const source = fs.readFileSync(path.join(__dirname, '../assistant-ui.js'), 'utf8');
 const MONTH = '2026-10';
@@ -41,6 +42,9 @@ function createUI(initial = [], options = {}) {
   const blobs = new Map();
   const contentWrites = [];
   const scrolls = [];
+  const accountActions=[];
+  const localValues=new Map(),localWrites=[];
+  const localStorage=options.storage||{getItem:key=>localValues.get(key)||null,setItem(key,value){localWrites.push({key,value});localValues.set(key,value);}};
   const addListener = (registry,type,callback) => {
     const handlers=registry.get(type)||[];handlers.push(callback);registry.set(type,handlers);
   };
@@ -109,7 +113,7 @@ function createUI(initial = [], options = {}) {
     setPeriod(month, day) { periods.push({ month, day }); },
     // Tests that exercise the automatic first visit explicitly finish startup.
     // Other handler tests stay before authentication initialization completes.
-    init: () => initialization, signInOut: async () => {}
+    init: () => initialization, signInOut: async () => {accountActions.push('sign-in-out');return options.signInOut?.();}
   };
   let currentHash = '#money';
   const location = {
@@ -119,6 +123,7 @@ function createUI(initial = [], options = {}) {
   const window = {
     HVFCore: core, HVFExtras: extras, HVFPlanner: planner, HVFWeekly: weekly, HVFStore: store,
     HVFPWA: options.pwa, HVFReminders: options.reminders,
+    HVFGuide:options.guide===true?guideModule:options.guide,localStorage,Notification:options.notification,
     HVFCategories: categories, HVFForecast: forecast, HVFBackup: backup, HVFLimits: limits, HVFFocus: focus,
     HVFNavigation:options.navigation||navigation, HVFMotion:motion, PointerEvent:function(){},innerWidth:options.mobile?390:1200,
     matchMedia:query=>({matches:query.includes('reduced-motion')?!!options.reduced:!!options.mobile}),
@@ -149,7 +154,7 @@ function createUI(initial = [], options = {}) {
   }, { filename: 'assistant-ui.js' });
 
   return {
-    node, periods, writes, focus, downloads,contentWrites,scrolls,
+    node, periods, writes, focus, downloads,contentWrites,scrolls,accountActions,localValues,localWrites,
     async finishInitialization(){finishInitialization();await initialization;await Promise.resolve();},
     contentWriteCount:()=>contentWrites.length,
     scrollTop:()=>window.scrollY,
@@ -492,6 +497,217 @@ test('an empty cached account snapshot is not mistaken for a new account before 
   assert.equal(ui.node('editor').open,false);assert.equal(ui.writes.length,0);
   ui.account('new',[],'offline');assert.equal(ui.node('editor').open,false);
   ui.status('synced');assert.equal(ui.node('editor').open,true);
+});
+
+const completedSetup=()=>({id:'onboarding-preferences',kind:'onboarding-preferences',month:'2000-05',completed:true,version:1});
+function offerStorage(values=new Map()){
+  const writes=[];
+  return {values,writes,getItem:key=>values.get(key)||null,setItem(key,value){writes.push({key,value});values.set(key,value);}};
+}
+function reminderOfferStub(initial={},onEnable){
+  let status={uid:'',configured:true,initialized:true,supported:true,needsInstall:false,permission:'default',enabled:false,busy:false,...initial};
+  const listeners=[],calls=[];
+  const publish=changes=>{status={...status,...changes};listeners.forEach(fn=>fn(clone(status)));};
+  return {calls,publish,api:{
+    getStatus:()=>clone(status),subscribe:fn=>listeners.push(fn),init:async()=>{calls.push('init');},
+    enable(){calls.push('enable');if(onEnable)return onEnable(publish);publish({enabled:true,permission:'granted'});return Promise.resolve(true);}
+  }};
+}
+const offeredHtml=ui=>normalize(ui.node('notificationOffer').innerHTML);
+
+test('the full-screen guide introduces four real feature sections before collecting any personal data',async()=>{
+  const ui=createUI([],{guide:true});await ui.finishInitialization();
+  assert.equal(ui.node('editor').open,true);assert.equal(ui.node('editor').classList.contains('onboarding-dialog'),true);
+  assert.match(ui.node('dialogTitle').textContent,/Один HVF для дня, целей и денег/);
+  assert.equal([...ui.fields().matchAll(/<details class="guide-feature">/g)].length,4);
+  for(const section of guideModule.features){
+    assert.ok(ui.fields().includes(section.title));
+    for(const item of section.items)assert.ok(ui.fields().includes(item.title),item.id);
+  }
+  assert.match(ui.fields(),/BYN, USD и RUB/);assert.match(ui.fields(),/Резервная копия/);assert.match(ui.fields(),/Google-синхронизация/);
+  assert.doesNotMatch(ui.fields(),/<input|<select|<textarea/,'the introduction does not silently fill an example plan');
+  assert.equal(ui.node('saveDialog').textContent,'Настроить HVF');assert.equal(ui.node('cancelDialog').textContent,'Начать без настройки');
+  assert.match(ui.fields(),/data-action="skip-onboarding"/);assert.equal(ui.records().length,0);assert.equal(ui.writes.length,0);
+});
+
+test('skipping the feature guide writes only the onboarding marker and never saves example finances or tasks',async()=>{
+  const ui=createUI([],{guide:true});await ui.finishInitialization();ui.click('skip-onboarding');
+  assert.equal(ui.node('editor').open,false);assert.equal(ui.records().length,1);
+  assert.equal(ui.records('onboarding-preferences')[0].skipped,true);assert.equal(ui.writes.length,1);
+  const revisited=createUI(ui.records(),{guide:true});await revisited.finishInitialization();
+  assert.equal(revisited.node('editor').open,false,'the guide is skipped on the next visit');
+});
+
+test('the feature introduction advances into the existing three-step setup and saves linked records only at the end',async()=>{
+  const ui=createUI([],{guide:true});await ui.finishInitialization();
+  await ui.submit({});assert.match(ui.node('dialogTitle').textContent,/шаг 1 из 3/);assert.equal(ui.writes.length,0);
+  await ui.submit({currency:'BYN',salary:'1500',nextDate:'2026-10-30',expectedAmount:'1500'});
+  assert.match(ui.node('dialogTitle').textContent,/шаг 2 из 3/);assert.equal(ui.writes.length,0);
+  await ui.submit({goalTitle:'Подготовиться к экзамену',outcome:'Решить пять вариантов'});
+  assert.match(ui.node('dialogTitle').textContent,/шаг 3 из 3/);assert.equal(ui.writes.length,0);
+  await ui.submit({taskTitle:'Решить первый вариант',duration:'40',start:'09:00',end:'21:00'});
+  assert.equal(ui.node('editor').open,false);assert.equal(ui.node('editor').classList.contains('onboarding-dialog'),false);
+  assert.equal(ui.records('task').length,1);assert.equal(ui.records('goal').length,1);
+  assert.equal(ui.records('task')[0].goalId,ui.records('goal')[0].id);assert.equal(ui.records('task')[0].duration,40);
+  assert.equal(ui.records('budget')[0].income,1500);assert.equal(ui.records('onboarding-preferences')[0].completed,true);
+});
+
+test('existing users with completed setup are not forced into the feature guide and can reopen it manually',async()=>{
+  const records=[completedSetup(),dayTask('keep-existing',{title:'Уже запланировано'})];
+  const ui=createUI(records,{guide:true});await ui.finishInitialization();
+  assert.equal(ui.node('editor').open,false);assert.equal(ui.writes.length,0);
+  ui.navigate('#settings');ui.click('start-onboarding');
+  assert.match(ui.node('dialogTitle').textContent,/Один HVF/);assert.equal([...ui.fields().matchAll(/<details class="guide-feature">/g)].length,4);
+  await ui.node('closeDialog').fire('click');ui.publish();
+  assert.equal(ui.node('editor').open,false);assert.deepEqual(ui.records(),records);assert.equal(ui.writes.length,0);
+});
+
+test('notification guidance is shown only after initialization and closing the full-screen guide, with no permission request on load',async()=>{
+  let permissions=0;const reminders=reminderOfferStub(),storage=offerStorage();
+  const ui=createUI([],{guide:true,reminders:reminders.api,storage,notification:{requestPermission(){permissions++;}}});
+  assert.equal(ui.node('notificationOffer').hidden,true);assert.equal(storage.writes.length,0);
+  await ui.finishInitialization();
+  assert.equal(ui.node('editor').open,true);assert.equal(ui.node('notificationOffer').hidden,true);assert.equal(storage.writes.length,0,'a covered card is not marked shown');
+  assert.deepEqual(reminders.calls,['init']);assert.equal(permissions,0);
+  await ui.node('closeDialog').fire('click');
+  assert.equal(ui.node('notificationOffer').hidden,false);assert.match(offeredHtml(ui),/Войти через Google/);
+  assert.equal(storage.writes.length,1);assert.equal(ui.writes.length,0);
+  assert.deepEqual(reminders.calls,['init']);assert.equal(permissions,0);
+});
+
+test('notification offers wait for reminder readiness and a matching signed-in uid, without rebuilding content',async()=>{
+  const reminders=reminderOfferStub({uid:'old-owner',initialized:false});
+  const ui=createUI([completedSetup()],{guide:true,reminders:reminders.api,initialUser:{uid:'alice'},initialStatus:'synced'});
+  await ui.finishInitialization();const before=ui.contentWriteCount();
+  assert.equal(ui.node('notificationOffer').hidden,true);
+  reminders.publish({initialized:true});assert.equal(ui.node('notificationOffer').hidden,true,'another owner’s ready state is ignored');
+  reminders.publish({uid:'alice'});assert.equal(ui.node('notificationOffer').hidden,false);assert.match(offeredHtml(ui),/data-id="enable"/);
+  assert.equal(ui.contentWriteCount(),before,'the offer lives outside the editable content');assert.equal(ui.writes.length,0);
+  reminders.publish({enabled:true,permission:'granted'});assert.equal(ui.node('notificationOffer').hidden,true);assert.equal(offeredHtml(ui),'');
+});
+
+test('notification guidance waits for confirmed account loading and suppresses denied or unavailable delivery',async()=>{
+  const reminders=reminderOfferStub({uid:'alice'}),storage=offerStorage();
+  const ui=createUI([completedSetup()],{guide:true,storage,reminders:reminders.api,initialUser:{uid:'alice'},initialStatus:'loading'});
+  await ui.finishInitialization();assert.equal(ui.node('notificationOffer').hidden,true);assert.equal(storage.writes.length,0);
+  ui.status('offline');assert.equal(ui.node('notificationOffer').hidden,true);assert.equal(storage.writes.length,0,'an offline cache does not count as a confirmed account');
+  ui.status('synced');assert.equal(ui.node('notificationOffer').hidden,false);assert.equal(storage.writes.length,1);
+  for(const blocked of [{permission:'denied'},{configured:false},{supported:false},{enabled:true}]){
+    const backend=reminderOfferStub({uid:'alice',...blocked}),local=offerStorage();
+    const blockedUI=createUI([completedSetup()],{guide:true,storage:local,reminders:backend.api,initialUser:{uid:'alice'},initialStatus:'synced'});
+    await blockedUI.finishInitialization();assert.equal(blockedUI.node('notificationOffer').hidden,true,JSON.stringify(blocked));
+    assert.equal(local.writes.length,0);assert.deepEqual(backend.calls,['init']);assert.equal(blockedUI.writes.length,0);
+  }
+});
+
+test('an offer actually shown once stays silent after reload even when the user never pressed Позже',async()=>{
+  const storage=offerStorage(),records=[completedSetup()],reminders=reminderOfferStub({uid:'alice'});
+  const ui=createUI(records,{guide:true,storage,reminders:reminders.api,initialUser:{uid:'alice'},initialStatus:'synced'});
+  await ui.finishInitialization();assert.equal(ui.node('notificationOffer').hidden,false);assert.equal(storage.writes.length,1);
+  assert.equal(typeof JSON.parse(storage.writes[0].value).offeredAt,'number');
+  const reloadedStorage=offerStorage(storage.values),reloadedReminder=reminderOfferStub({uid:'alice'});
+  const revisited=createUI(records,{guide:true,storage:reloadedStorage,reminders:reloadedReminder.api,initialUser:{uid:'alice'},initialStatus:'synced'});
+  await revisited.finishInitialization();assert.equal(revisited.node('notificationOffer').hidden,true);assert.equal(reloadedStorage.writes.length,0);
+  assert.deepEqual(reloadedReminder.calls,['init']);assert.equal(ui.writes.length,0);assert.equal(revisited.writes.length,0);
+});
+
+test('Позже persists the device choice locally and does not add planning records or nag after reload',async()=>{
+  const storage=offerStorage(),records=[completedSetup()],reminders=reminderOfferStub({uid:'alice'});
+  const ui=createUI(records,{guide:true,storage,reminders:reminders.api,initialUser:{uid:'alice'},initialStatus:'synced'});
+  await ui.finishInitialization();assert.equal(ui.node('notificationOffer').hidden,false);
+  ui.click('dismiss-reminder-offer');assert.equal(ui.node('notificationOffer').hidden,true);
+  assert.equal(ui.writes.length,0);assert.deepEqual(ui.records(),records);
+  assert.equal(storage.writes.length,2);assert.ok(storage.writes.every(({key})=>key.startsWith('hvf-notification-offer:v1:')));
+  assert.ok(JSON.parse(storage.writes.at(-1).value).dismissedAt>=0);
+  const reloadedReminder=reminderOfferStub({uid:'alice'}),reloadedStorage=offerStorage(storage.values);
+  const revisited=createUI(records,{guide:true,storage:reloadedStorage,reminders:reloadedReminder.api,initialUser:{uid:'alice'},initialStatus:'synced'});
+  await revisited.finishInitialization();assert.equal(revisited.node('notificationOffer').hidden,true);
+  assert.equal(reloadedStorage.writes.length,0);assert.deepEqual(reloadedReminder.calls,['init']);assert.equal(revisited.writes.length,0);
+});
+
+test('enable from the welcome card runs directly in the click gesture and never from rendering',async()=>{
+  let gesture=false,nativeRequests=0;
+  const notification={requestPermission(){assert.equal(gesture,true,'native request stays in the user gesture');nativeRequests++;return Promise.resolve('granted');}};
+  const reminders=reminderOfferStub({uid:'alice'},publish=>{
+    notification.requestPermission();publish({enabled:true,permission:'granted'});return Promise.resolve(true);
+  });
+  const ui=createUI([completedSetup()],{guide:true,reminders:reminders.api,notification,initialUser:{uid:'alice'},initialStatus:'synced'});
+  await ui.finishInitialization();assert.deepEqual(reminders.calls,['init']);assert.equal(nativeRequests,0);
+  ui.publish();reminders.publish({message:'Готово к подключению'});assert.deepEqual(reminders.calls,['init']);assert.equal(nativeRequests,0);
+  gesture=true;ui.click('welcome-reminders','enable');gesture=false;
+  assert.deepEqual(reminders.calls,['init','enable'],'enable is invoked synchronously before the click returns');assert.equal(nativeRequests,1);
+  await Promise.resolve();assert.equal(ui.node('notificationOffer').hidden,true);assert.equal(ui.writes.length,0);
+});
+
+test('anonymous login and iPhone installation cards explain the next step without enabling notifications',async()=>{
+  const anonymous=reminderOfferStub(),ui=createUI([completedSetup()],{guide:true,reminders:anonymous.api});
+  await ui.finishInitialization();assert.match(offeredHtml(ui),/data-id="login"/);
+  ui.click('welcome-reminders','login');assert.deepEqual(ui.accountActions,['sign-in-out']);assert.deepEqual(anonymous.calls,['init']);assert.equal(ui.writes.length,0);
+  const phone=reminderOfferStub({needsInstall:true,supported:false,permission:'unsupported'});
+  const installed=createUI([completedSetup()],{guide:true,reminders:phone.api});await installed.finishInitialization();
+  assert.match(offeredHtml(installed),/data-id="install"/);assert.match(offeredHtml(installed),/пока не включены/);
+  installed.click('welcome-reminders','install');assert.equal(installed.node('editor').open,true);assert.match(installed.fields(),/На экран Домой/);
+  assert.deepEqual(phone.calls,['init']);assert.equal(installed.writes.length,0);
+});
+
+test('changing accounts clears a mismatched reminder offer and stale enable controls cannot act for another uid',async()=>{
+  const reminders=reminderOfferStub({uid:'alice'}),records=[completedSetup()];
+  const ui=createUI(records,{guide:true,reminders:reminders.api,initialUser:{uid:'alice'},initialStatus:'synced'});
+  await ui.finishInitialization();assert.equal(ui.node('notificationOffer').hidden,false);
+  ui.account('bob',records,'synced');assert.equal(ui.node('notificationOffer').hidden,true);assert.equal(offeredHtml(ui),'');
+  ui.click('welcome-reminders','enable');assert.deepEqual(reminders.calls,['init']);
+  reminders.publish({uid:'bob'});assert.equal(ui.node('notificationOffer').hidden,false);assert.match(offeredHtml(ui),/data-id="enable"/);
+  ui.account(null,records,'local');assert.equal(ui.node('notificationOffer').hidden,true);assert.equal(offeredHtml(ui),'');
+  reminders.publish({uid:''});assert.match(offeredHtml(ui),/data-id="login"/);assert.equal(ui.writes.length,0);
+});
+
+function financialHistoryMarkup(ui){
+  const markup=ui.html().match(/<section class="panel money-history">[\s\S]*?<\/section>/)?.[0];
+  assert.ok(markup,'the financial operations history is visible');return markup;
+}
+
+test('unified history filters only the displayed rows while all budget totals and records remain unchanged',async()=>{
+  const records=[
+    {id:'budget-'+MONTH+'-BYN',kind:'budget',month:MONTH,currency:'BYN',income:1000,reservePercent:0,goalsPercent:0},
+    {id:'gift',kind:'income',month:MONTH,date:DAY,title:'Подарок',amount:100,currency:'BYN'},
+    {id:'food',kind:'expense',month:MONTH,date:DAY,title:'Продукты',amount:30,currency:'BYN',category:'flexible'},
+    {id:'ride',kind:'expense',month:MONTH,date:DAY,title:'Проезд',amount:10,currency:'BYN',category:'flexible'},
+    {id:'dollars',kind:'income',month:MONTH,date:DAY,title:'Долларовый доход',amount:999,currency:'USD'},
+    {id:'past',kind:'income',month:'2026-09',date:'2026-09-23',title:'Прошлый месяц',amount:999,currency:'BYN'}
+  ];
+  const ui=createUI(records),totals=()=>['Все поступления','Всего осталось','Свободно тратить'].map(name=>statValue(ui,name));
+  assert.deepEqual(totals(),['1 100 BYN','1 060 BYN','1 060 BYN']);const before=totals();
+  assert.equal([...financialHistoryMarkup(ui).matchAll(/<article class="expense-row">/g)].length,3);
+  assert.match(financialHistoryMarkup(ui),/\+100 BYN/);assert.match(financialHistoryMarkup(ui),/−30 BYN/);
+  assert.doesNotMatch(financialHistoryMarkup(ui),/Долларовый доход|Прошлый месяц/,'history keeps the selected month and currency');
+  ui.click('history-filter','expense');let history=financialHistoryMarkup(ui);
+  assert.match(history,/data-id="expense" aria-pressed="true"/);assert.match(history,/Продукты/);assert.match(history,/Проезд/);assert.doesNotMatch(history,/Подарок/);
+  assert.equal([...history.matchAll(/<article class="expense-row">/g)].length,2);assert.deepEqual(totals(),before);
+  ui.click('edit-expense','food');assert.match(ui.fields(),/value="Продукты"/);assert.match(ui.fields(),/name="amount"[^>]*value="30"/);await ui.node('closeDialog').fire('click');
+  ui.click('history-filter','income');history=financialHistoryMarkup(ui);
+  assert.match(history,/data-id="income" aria-pressed="true"/);assert.match(history,/Подарок/);assert.doesNotMatch(history,/Продукты|Проезд/);
+  assert.match(history,/data-action="edit-income" data-id="gift"/);assert.equal([...history.matchAll(/<article class="expense-row">/g)].length,1);
+  ui.click('edit-income','gift');assert.match(ui.fields(),/value="Подарок"/);assert.match(ui.fields(),/name="amount"[^>]*value="100"/);await ui.node('closeDialog').fire('click');
+  ui.click('history-filter','all');history=financialHistoryMarkup(ui);assert.match(history,/data-id="all" aria-pressed="true"/);
+  for(const title of ['Подарок','Продукты','Проезд'])assert.ok(history.includes(title));
+  assert.deepEqual(totals(),before);assert.deepEqual(ui.records(),records);assert.equal(ui.writes.length,0);
+  const rendered=ui.contentWriteCount();ui.click('history-filter','not-a-filter');assert.equal(ui.contentWriteCount(),rendered);
+});
+
+test('advanced day actions stay in a closed native disclosure and still open the existing tools',async()=>{
+  const task=dayTask('important',{title:'Важное дело',priority:2}),ui=createUI([task]);ui.navigate('#day');
+  const details=ui.html().match(/<details class="day-extra-tools"[^>]*>[\s\S]*?<\/details>/)?.[0];
+  assert.ok(details,'the secondary day controls are grouped into details');
+  assert.match(details,/<summary>Повторы, перенос и фокус<\/summary>/);assert.doesNotMatch(details,/<details[^>]*\bopen\b/);
+  assert.match(details,/data-action="add-routine"/);assert.match(details,/data-action="move-preview"/);
+  assert.match(details,/href="#focus"/);assert.match(details,/href="#week"/);
+  assert.match(ui.html(),/data-action="important-only"/,'the important filter remains directly available');
+  ui.click('add-routine');assert.equal(ui.node('editor').open,true);assert.match(ui.node('dialogTitle').textContent,/Повторяющееся дело/);assert.match(ui.fields(),/name="weekday1"/);
+  await ui.node('closeDialog').fire('click');ui.click('move-preview');
+  assert.equal(ui.node('editor').open,true);assert.match(ui.fields(),/Важное дело/);assert.match(ui.node('dialogTitle').textContent,/Перенести на завтра/);
+  await ui.node('closeDialog').fire('click');ui.navigate('#focus');assert.match(ui.html(),/Важное дело/);assert.match(ui.html(),/data-action="focus-task"/);
+  ui.navigate('#week');assert.match(ui.html(),/Неделя в деталях/);
+  assert.equal(ui.writes.length,0);assert.deepEqual(ui.records(),[task]);
 });
 
 const settleUI=async()=>{for(let i=0;i<4;i++)await new Promise(resolve=>setImmediate(resolve));};
