@@ -1,0 +1,49 @@
+name: Publish legacy GitHub Pages migration
+
+# Run only after the new host and Google sign-in have been verified.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish-migration:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Validate migration files
+        run: |
+          node --check legacy-migration.js
+          node --check legacy-service-worker.js
+          node --test tests/migration.test.cjs
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+      - name: Prepare legacy migration page only
+        run: |
+          mkdir -p legacy-public
+          cp legacy-migration.html legacy-public/index.html
+          cp legacy-service-worker.js legacy-public/service-worker.js
+          cp legacy-migration.js firebase-config.js reminders-config.js assistant-core.js assistant-planner.js assistant-store.js assistant-backup.js favicon.svg icon-192.png icon-512.png apple-touch-icon.png legacy-public/
+          touch legacy-public/.nojekyll
+      - name: Upload legacy migration artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: legacy-public
+      - name: Publish legacy migration page
+        id: deployment
+        uses: actions/deploy-pages@v5

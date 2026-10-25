@@ -91,12 +91,15 @@ async function seed(f, records = [task()], suffix = 'one', uid = 'alice') {
   return sub;
 }
 
-test('public configuration and health expose no credentials; CORS admits only the app origin', async () => {
+test('public configuration and health expose no credentials; CORS admits only the app and migration origins', async () => {
   const f = await fixture();
   const config = await f.call('GET', '/v1/config');
   assert.equal(config.status, 200);
   assert.deepEqual(await config.json(), { publicKey: f.env.VAPID_PUBLIC_KEY });
   assert.equal(config.headers.get('Access-Control-Allow-Origin'), f.api.APP_ORIGIN);
+  const legacy = await f.call('GET', '/v1/config', undefined, 'alice', { Origin: f.api.LEGACY_ORIGIN });
+  assert.equal(legacy.status, 200);
+  assert.equal(legacy.headers.get('Access-Control-Allow-Origin'), f.api.LEGACY_ORIGIN);
   assert.equal((await f.call('GET', '/v1/health')).status, 200);
   assert.equal((await f.call('GET', '/v1/config', undefined, 'alice', { Origin: 'https://evil.example' })).status, 403);
   const preflight = await f.call('OPTIONS', '/v1/plan');

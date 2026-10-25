@@ -30,7 +30,10 @@
   let day = planner.validDate(reminderRouteDate())?reminderRouteDate():nowDate(), month = day.slice(0,7), state = store.getState(), view = 'overview', lastRenderedView = '', submitEditor = null, busy = false, onboarding = null, restoreContext = null, editorLabel = 'Сохранить', toastTimer, undoAction, importantOnly = false, movePreview = null, completionFlash = null, pendingReminderDate = '';
   const navigation=window.HVFNavigation?.create({root:$('content'),window,document,getRoute:()=>view,navigate:route=>{location.hash=route;},isBlocked:()=>busy||$('editor').open});
   const motion=window.HVFMotion?.create({window,document}).init();
+  const billing=window.HVFBilling?.create({endpoint:window.HVF_APP_CONFIG?.billingEndpoint,getToken:()=>store.getIdToken()});
   let renderedKey='',focusRevision=0,contentMotion=null;
+  let onboardingReady=false;
+  const onboardingShown=new Set();
   function transitionChange(action,direction=0) {
     contentMotion={refresh:true,direction};
     try{return action();}finally{contentMotion=null;}
@@ -100,15 +103,45 @@
     return '<section class="panel">'+panelHead(compact?'Мой день':'Дела на '+fmtDate(day),compact?'day':'',compact?'Открыть день':'')+tools+featureTools+(shown.length?taskRows(compact?shown.slice(0,5):shown):!waiting.length?empty('calendar',importantOnly&&!compact?'Важных дел нет':'В этом дне есть место для тебя',importantOnly&&!compact?'Повышай приоритет в редакторе дела или покажи весь день.':'Добавь первое дело. Время можно не указывать — помощник предложит длительность.',button(importantOnly&&!compact?'Показать все дела':'+ Добавить дело',importantOnly&&!compact?'important-only':'add-task','small secondary')):'')+(waiting.length?'<div class="notice warning">'+waiting.length+' дел пока не помещаются'+(p.conflicts.length?' или пересекаются с другими встречами':'')+'. Они сохранены: можно изменить время, длительность или перенести их на другой день.</div>'+taskRows(waiting,true):'')+(shown.length&&compact&&shown.length>5?'<a class="text-link" href="#day">Ещё '+(shown.length-5)+' дел →</a>':'')+'</section>';
   }
   function setEditorLabel(label) {editorLabel=label;$('saveDialog').textContent=label;}
+  function clearOnboardingPresentation() {
+    $('editor').classList.remove('onboarding-dialog');
+    $('dialogEyebrow').textContent='ЛИЧНЫЙ ПОМОЩНИК';
+    $('cancelDialog').textContent='Отмена';
+  }
+  function hasPersonalData() {
+    const kinds=new Set(['task','routine','routine-skip','goal','budget','income','commitment','expense','settings','finance-preferences','spending-limit','expense-category','income-plan']);
+    return allRecords().some(record=>kinds.has(record.kind));
+  }
+  function maybeStartOnboarding() {
+    const scope=state.user?.uid||'anonymous';
+    if(!onboardingReady||state.status==='loading'||busy||$('editor').open||onboardingShown.has(scope)||getRecord('onboarding-preferences')?.completed||hasPersonalData())return;
+    // An empty offline Firestore snapshot can precede the account's server
+    // records. Wait for that first confirmed snapshot before offering setup.
+    if(state.user&&!['synced','syncing'].includes(state.status))return;
+    startOnboarding();
+  }
+  function skipOnboarding() {
+    if(busy)return;
+    if(state.status==='loading'){toast('Дождись загрузки данных аккаунта.');return;}
+    const scope=onboarding?.scope||state.user?.uid||'anonymous';
+    try{
+      store.putMany([{id:'onboarding-preferences',kind:'onboarding-preferences',month:'2000-05',completed:true,skipped:true,version:1,completedAt:new Date().toISOString()}],{expectedOwner:scope});
+      onboardingShown.add(scope);
+      if(onboarding)closeEditor();
+      toast('Настройку можно открыть позже в разделе «Настройки».');
+    }catch(error){if(onboarding)$('formError').textContent=error.message||'Не удалось пропустить настройку.';else toast(error.message||'Не удалось пропустить настройку.');}
+  }
   function onboardingPanel() {
     if(state.status==='loading'||getRecord('onboarding-preferences')?.completed)return '';
     const existing=allRecords().some(r=>['task','goal','budget','income','commitment'].includes(r.kind));
     return '<section class="onboarding-card"><div><p class="eyebrow">'+(existing?'НАСТРОЙКА HVF':'ДОБРО ПОЖАЛОВАТЬ В HVF')+'</p><h2>'+(existing?'Собери планы и деньги в одну систему':'Начни со своего дня и бюджета')+'</h2><p>Три коротких шага: доход, цель и первое дело. Все поля можно пропустить; готового расписания здесь нет.</p></div><div class="onboarding-actions">'+button('Настроить HVF','start-onboarding')+button('Пока пропустить','skip-onboarding','secondary')+'</div></section>';
   }
   function startOnboarding() {
+    if(busy)return;
     if(state.status==='loading'){toast('Дождись загрузки данных аккаунта.');return;}
     const currency=selectedCurrency(),b=budgetConfig(currency),s=settings(),incomePlan=getRecord('income-plan-'+currency)||{};
     onboarding={step:0,scope:state.user?.uid||'anonymous',month,day,values:{currency,salary:b.income||'',nextDate:incomePlan.nextDate||'',expectedAmount:incomePlan.expectedAmount||'',goalTitle:'',outcome:'',taskTitle:'',duration:'',start:s.start,end:s.end}};
+    onboardingShown.add(onboarding.scope);
     openEditor('Начальная настройка','',async data=>{
       if(!onboarding)throw new Error('Открой настройку заново.');
       captureOnboarding(data,true);
@@ -128,7 +161,7 @@
       items.push({id:'settings-'+month,kind:'settings',month,start:v.start,end:v.end,breakMinutes:settings().breakMinutes??5});
       items.push({id:'onboarding-preferences',kind:'onboarding-preferences',month:'2000-05',completed:true,version:1,completedAt:new Date().toISOString()});
       store.putMany(items,{expectedOwner:w.scope});onboarding=null;toast('Настройка сохранена. Твои планы и бюджет готовы к работе.');
-    });showOnboarding(false);
+    },'onboarding');showOnboarding(false);
   }
   function captureOnboarding(data,validate) {
     const w=onboarding;if(!w)return;const keys=[['currency','salary','nextDate','expectedAmount'],['goalTitle','outcome'],['taskTitle','duration','start','end']][w.step];
@@ -151,7 +184,7 @@
   function showOnboarding(reveal=true) {
     const w=onboarding,v=w.values,labels=['Деньги','Цель месяца','Первое дело'];
     $('dialogTitle').textContent=labels[w.step]+' · шаг '+(w.step+1)+' из 3';
-    const prefix='<ol class="setup-progress" aria-label="Шаги настройки">'+labels.map((name,i)=>'<li class="'+(i===w.step?'current':i<w.step?'complete':'')+'">'+(i+1)+'. '+name+'</li>').join('')+'</ol>';
+    const prefix='<div class="setup-top"><p class="setup-intro">Твой день, цели и деньги — в одном месте. Настроим HVF под тебя за три коротких шага.</p>'+button('Пропустить','skip-onboarding','secondary small setup-skip')+'</div><ol class="setup-progress" aria-label="Шаги настройки">'+labels.map((name,i)=>'<li class="'+(i===w.step?'current':i<w.step?'complete':'')+'"'+(i===w.step?' aria-current="step"':'')+'>'+(i+1)+'. '+name+'</li>').join('')+'</ol>';
     let html=w.step===0?'<p class="preview-intro">Сначала отделим полученные деньги от ожидаемых.</p>'+currencyField(v.currency)+field('Уже полученная зарплата за '+monthLabel(),'salary','number',v.salary,'min="0" max="1000000000" step="0.01" placeholder="Можно позже"')+'<div class="field-row">'+field('Следующее поступление','nextDate','date',v.nextDate,'min="'+nowDate()+'"')+field('Ожидаемая сумма','expectedAmount','number',v.expectedAmount,'min="0" max="1000000000" step="0.01" placeholder="Необязательно"')+'</div><p class="status-note">Будущий доход не увеличивает доступный остаток. Обязательные суммы можно добавить в «Финансах» после настройки.</p>':w.step===1?'<p class="preview-intro">Какой один результат будет важен в этом месяце?</p>'+field('Цель месяца','goalTitle','text',v.goalTitle,'maxlength="100" placeholder="Например, подготовиться к экзамену"')+field('Как поймёшь, что цель достигнута','outcome','text',v.outcome,'maxlength="300" placeholder="Например, решить пять вариантов"')+'<p class="status-note">Можно оставить пустым. Шаги к цели добавляются тобой, без шаблонного плана.</p>':'<p class="preview-intro">Выбери конкретный первый шаг на '+fmtDate(w.day)+'. Он свяжется с новой целью.</p>'+field('Что сделать','taskTitle','text',v.taskTitle,'maxlength="100" placeholder="Например, решить первый вариант"')+field('Длительность, мин','duration','number',v.duration,'min="5" max="480" step="1" placeholder="Оценить по названию"')+'<div class="field-row">'+field('Начало дня','start','time',v.start,'required')+field('Конец дня','end','time',v.end,'required')+'</div><div class="notice"><strong>Будет сохранено</strong><p>'+esc(v.salary!==''?'Полученная зарплата: '+money(Number(v.salary),v.currency)+'. ':'Зарплата пока не указана. ')+esc(v.nextDate?'Следующее поступление: '+fmtDate(v.nextDate)+'. ':'')+esc(v.goalTitle?'Цель: '+v.goalTitle+'. ':'Без новой цели. ')+'Дело появится, если заполнить его название.</p></div>';
     $('dialogFields').innerHTML=prefix+html+(w.step?button('← Назад','onboarding-back','secondary small'):'');setEditorLabel(w.step===2?'Сохранить настройку':'Далее');$('formError').textContent='';$('editor').scrollTop=0;if(reveal)motion?.open($('editor'));
   }
@@ -306,7 +339,17 @@
     const warnings=(b.mandatoryShortfall?'<div class="notice warning">На обязательные суммы не хватает '+money(b.mandatoryShortfall)+'. Добавь поступление или скорректируй суммы.</div>':'')+(b.protectionShortfall?'<div class="notice warning">Расходы затронули отложенные деньги: сейчас не покрыто '+money(b.protectionShortfall)+'. Свободных денег пока нет.</div>':'')+(b.deficit?'<div class="notice warning">Расходы превысили доход на '+money(b.deficit)+'.</div>':'');
     return head('Деньги с намерением.','Обязательное — отложено. Свободное — видно.',actionsHtml)+currencyStrip()+'<p class="currency-note">'+currencies[selectedCurrency()]+'. BYN, USD и RUB считаются отдельно, без пересчёта по курсу. Старые записи без валюты сохранены в RUB.</p><div class="stats">'+stat('Все поступления',money(b.income),'Зарплата '+money(b.salaryIncome)+' · ещё '+money(b.additionalIncome),'wallet')+stat('Всего осталось',money(b.available),'Потрачено '+money(b.spent),'arrow')+stat('Свободно тратить',money(b.freeToSpend),'За вычетом отложенного','target')+'</div>'+warnings+forecastPanel()+'<div class="columns"><div class="stack">'+commitmentPanel(b)+'<section class="panel">'+panelHead('Дополнительные поступления')+financialHistory('income')+'</section><section class="panel">'+panelHead('История расходов')+financialHistory('expense')+'</section></div><div class="stack"><section class="panel"><div class="panel-head"><h2>Зарплата и план</h2><button type="button" class="text-link" data-action="edit-budget">Изменить ↗</button></div>'+(b.income?budgetLines(b,true):empty('wallet','Укажи зарплату за месяц','Дополнительные поступления записываются отдельно и тоже увеличивают бюджет.',button('Указать зарплату','edit-budget','small secondary')))+'<p class="status-note">Сначала обязательные суммы, потом '+b.reservePercent+'% остатка в резерв и '+b.goalsPercent+'% следующего остатка на цели. Неиспользованное остаётся свободным. Проценты можно изменить.</p></section><section class="panel">'+panelHead('На твои цели')+(b.goalAllocations.some(g=>g.target>0)?b.goalAllocations.filter(g=>g.target>0).map(g=>'<div class="allocation"><div class="allocation-top"><strong>'+esc(g.title)+'</strong><strong>'+money(g.allocation)+'</strong></div><p>План на месяц · оплачено '+money(g.spent)+'</p><p>Остаток плана '+money(g.budgetRemaining)+' · до цели '+money(g.remaining)+'</p></div>').join(''):empty('target','Для будущего важного','Укажи денежную цель в '+selectedCurrency()+', и она появится в плане.',button('+ Добавить цель','add-goal','small secondary')))+'</section>'+categoryPanel()+limitsPanel()+moneyAdvice(b,days)+'</div></div>';
   }
-  function settingsAccountContent() {return '<h3>Телефон и компьютер — один помощник</h3><p>'+esc(syncText())+'</p>'+button(state.user?'Выйти из аккаунта':'Войти через Google','account','secondary')+'<p>'+esc(state.user?.email||'На обоих устройствах нужен один Google-аккаунт.')+'</p>'+(state.error?'<div class="notice warning">'+esc(state.error)+'</div>':'');}
+  function membershipContent(){
+    const s=billing?.getState()||{},ready=s.catalog?.paymentsReady===true,account=s.account;
+    const plans=s.plans||[{id:'monthly',amount:800},{id:'yearly',amount:7200}];
+    const features=['Дела, приоритеты и повторения','Цели месяца и конкретные шаги','Бюджет, обязательные суммы и категории','Прогноз до следующего дохода и лимиты','Итоги недели и напоминания'];
+    const active=account?.plan==='plus'&&account.status==='active';
+    const end=account?.periodEnd&&Number.isFinite(Date.parse(account.periodEnd))?new Intl.DateTimeFormat('ru-RU',{day:'numeric',month:'long',year:'numeric'}).format(new Date(account.periodEnd)):'';
+    const controls=s.loading?'<p class="membership-note" role="status">Проверяю тарифы и статус…</p>':s.error?'<p class="error" role="status">'+esc(s.error)+'</p>'+button('Повторить проверку','billing-refresh','secondary'):'';
+    return '<div class="membership-intro"><span class="tag">'+(ready?'HVF Plus':'Открытая бета')+'</span><h2>'+(ready?'Планы и деньги — вместе.':'Попробуй HVF без оплаты.')+'</h2><p>'+(ready?'Один тариф для телефона и компьютера. Подписка привязана к твоему Google-аккаунту.':'Сейчас все возможности доступны бесплатно. Цены Plus подготовлены для запуска; оформить платную подписку пока нельзя.')+'</p></div><div class="membership-grid">'+plans.map(p=>'<article class="membership-card '+(p.id==='yearly'?'recommended':'')+'"><h3>HVF Plus · '+(p.id==='yearly'?'год':'месяц')+'</h3><div class="membership-price">'+money(p.amount/100,'BYN')+'<small> / '+(p.id==='yearly'?'год':'месяц')+'</small></div><p>'+(p.id==='yearly'?'Эквивалент 6 BYN в месяц · на 25% дешевле помесячной оплаты.':'Оплата за один месяц. Для телефона и компьютера.')+'</p>'+(ready?button('Выбрать '+(p.id==='yearly'?'год':'месяц'),'billing-checkout','full',p.id):'<span class="tag">Оплата ещё не открыта</span>')+'</article>').join('')+'</div><section class="panel"><h2>Один помощник для твоего дня</h2><ul class="membership-list">'+features.map(f=>'<li>'+esc(f)+'</li>').join('')+'</ul>'+(!ready?'<a class="button" href="#day">Начать бесплатно</a>':'')+'<div class="membership-account"><h3>'+(active?'HVF Plus активен':account?.status==='pending'?'Ожидается подтверждение оплаты':ready?'Твой доступ':'Сейчас — бесплатная бета')+'</h3><p>'+esc(active?'Оплаченный доступ'+(end?' до '+end:'')+'. '+(account.cancelAtPeriodEnd?'Автопродление отключено.':'Автопродление включено.'):ready&&!state.user?'Войди через Google, чтобы подписка работала на всех устройствах.':!ready?'Списаний и платных подписок сейчас нет. Включение оплаты будет показано явно.':'Активная подписка пока не подтверждена.')+'</p>'+controls+'<div class="membership-actions">'+(ready&&!state.user?button('Войти через Google','account','secondary'):'')+(!s.loading&&billing?button('Обновить статус','billing-refresh','secondary'):'')+(active&&!account.cancelAtPeriodEnd?button('Отключить автопродление','billing-cancel','secondary'):'')+'</div></div><div class="membership-links"><a href="./privacy.html" target="_blank" rel="noopener">Как хранятся данные ↗</a><a href="./terms.html" target="_blank" rel="noopener">Условия беты и будущей подписки ↗</a></div></section>';
+  }
+  function membershipView(){return head('HVF Plus.','Понятные тарифы и управление подпиской.')+'<div id="membershipContent">'+membershipContent()+'</div>';}
+  function settingsAccountContent() {return '<h3>Телефон и компьютер — один помощник</h3><p>'+esc(syncText())+'</p>'+button(state.user?'Выйти из аккаунта':'Войти через Google','account','secondary')+'<p>'+esc(state.user?.email||'На обоих устройствах нужен один Google-аккаунт.')+'</p><a class="text-link" href="#plans">Тарифы и подписка HVF Plus ↗</a>'+(state.error?'<div class="notice warning">'+esc(state.error)+'</div>':'');}
   function settingsView() {
     const s=settings();
     return head('Под твой ритм.','Настройки помощника и связь между устройствами.')+'<div class="stack"><section class="panel"><div class="settings-section" id="settingsAccountPanel">'+settingsAccountContent()+'</div><div class="settings-section"><h3>Время для дел · '+esc(monthLabel())+'</h3><p>Все дни выбранного месяца используют эти границы. Встроенных занятий нет; между делами оставляется указанный перерыв.</p><form id="rhythmForm" class="inline-form"><label class="field">Начало дня<input name="start" type="time" value="'+esc(s.start)+'" required></label><label class="field">Конец дня<input name="end" type="time" value="'+esc(s.end)+'" required></label><label class="field">Перерыв, мин<input name="breakMinutes" type="number" min="0" max="60" step="1" value="'+s.breakMinutes+'" required></label><button class="button" type="submit">Сохранить</button></form></div><div class="settings-section"><h3>Первый запуск</h3><p>Пройди три шага: доход, цель и конкретное дело. Сохранение происходит только в конце.</p>'+button('Начальная настройка','start-onboarding','secondary')+'</div><div class="settings-section"><h3>Резервная копия и восстановление</h3><p>Копия содержит все месяцы, дела, цели, финансы и категории. Храни её в безопасном месте: в файле есть личные данные.</p><div class="backup-actions">'+button(icon('download')+' Скачать полную копию','export','secondary')+'<label class="button secondary backup-file-label" for="backupFile">Восстановить из файла</label><input class="sr-only" id="backupFile" type="file" accept="application/json,.json" '+(state.status==='loading'?'disabled':'')+'></div><p class="status-note">Перед восстановлением покажем новые записи и совпадения. Ничего не удаляется автоматически. Поддерживаются и прежние месячные копии HVF.</p></div></section><section class="panel" id="remindersPanel"></section><section class="panel" id="installationPanel"></section></div>';
@@ -319,7 +362,7 @@
   }
   function installationContent() {
     const pwa=window.HVFPWA,status=pwa?.getStatus()||{};
-    return '<h3>'+(status.installed?'HVF установлен на этом устройстве':'Приложение на телефоне и компьютере')+'</h3><p class="status-note">Постоянная ссылка: <a class="text-link" href="https://haveffee.github.io/daily-schedule/" target="_blank" rel="noopener noreferrer">haveffee.github.io/daily-schedule ↗</a><br>Приложение размещается на GitHub Pages. Компьютер можно выключать: телефон обращается к внешнему хостингу, а синхронизация работает через Firebase.</p><p class="status-note">На iPhone: открой ссылку в Safari → «Поделиться» → «На экран Домой». На компьютере: открой ссылку в Chrome или Edge → меню браузера → «Установить приложение».</p>'+(status.installed?'':button(status.canInstall?'Установить HVF':'Как установить','install-app','secondary'))+(status.offlineReady?'<p class="status-note">Файлы приложения сохранены на этом устройстве. Для входа и обмена данными между устройствами нужен интернет.</p>':'')+(status.updateReady?'<div class="notice">Доступно обновление. Оно применится после закрытия всех окон HVF и следующего открытия.</div>':'')+(status.error?'<p class="status-note">'+esc(status.error)+'</p>':'');
+    return '<h3>'+(status.installed?'HVF установлен на этом устройстве':'Приложение на телефоне и компьютере')+'</h3><p class="status-note">Постоянная ссылка: <a class="text-link" href="https://hvf-app.haveffee-assistant.workers.dev/" target="_blank" rel="noopener noreferrer">hvf-app.haveffee-assistant.workers.dev ↗</a><br>Приложение размещается на Cloudflare. Компьютер можно выключать: телефон обращается к внешнему хостингу, а синхронизация работает через Firebase.</p><p class="status-note">На iPhone: открой ссылку в Safari → «Поделиться» → «На экран Домой». На компьютере: открой ссылку в Chrome или Edge → меню браузера → «Установить приложение».</p>'+(status.installed?'':button(status.canInstall?'Установить HVF':'Как установить','install-app','secondary'))+(status.offlineReady?'<p class="status-note">Файлы приложения сохранены на этом устройстве. Для входа и обмена данными между устройствами нужен интернет.</p>':'')+(status.updateReady?'<div class="notice">Доступно обновление. Оно применится после закрытия всех окон HVF и следующего открытия.</div>':'')+(status.error?'<p class="status-note">'+esc(status.error)+'</p>':'');
   }
   function showInstallHelp() {
     const help=window.HVFPWA?.getInstallInstructions()||{title:'Установить HVF',steps:['На iPhone открой постоянную ссылку в Safari.','Выбери «Поделиться» → «На экран Домой».','На компьютере открой ссылку в Chrome или Edge и выбери установку приложения в меню браузера.'],sourceUrl:'https://support.apple.com/guide/iphone/iph42ab2f3a7/ios'};
@@ -349,12 +392,12 @@
   }
   function render() {
     const route=planner.validDate(reminderRouteDate())?'day':location.hash.slice(1);
-    view=['overview','day','week','goals','money','settings','focus'].includes(route)?route:'overview';
+    view=['overview','day','week','goals','money','settings','focus','plans'].includes(route)?route:'overview';
     renderChrome();
     const key=contentKey();if(key===renderedKey)return;
     const previous=lastRenderedView,changed=previous!==view,animation=changed?null:contentMotion;
     if(changed||animation)navigation?.prepare($('content'),previous,view,animation);else navigation?.settle();
-    $('content').innerHTML=view==='overview'?onboardingPanel()+focusMini()+overview()+weekTeaser():view==='day'?head('День в твоём ритме.',fmtDate(day,{weekday:'long',day:'numeric',month:'long'})+' · меняй дела, остальное пересчитается.',button(icon('plus')+' Добавить дело','add-task'))+onboardingPanel()+focusMini()+'<div class="stack">'+dayPanel()+routinePanel()+'</div>':view==='focus'?focusView():view==='week'?weeklyView():view==='goals'?goalsView():view==='money'?moneyView():settingsView();
+    $('content').innerHTML=view==='overview'?onboardingPanel()+focusMini()+overview()+weekTeaser():view==='day'?head('День в твоём ритме.',fmtDate(day,{weekday:'long',day:'numeric',month:'long'})+' · меняй дела, остальное пересчитается.',button(icon('plus')+' Добавить дело','add-task'))+onboardingPanel()+focusMini()+'<div class="stack">'+dayPanel()+routinePanel()+'</div>':view==='plans'?membershipView():view==='focus'?focusView():view==='week'?weeklyView():view==='goals'?goalsView():view==='money'?moneyView():settingsView();
     if(view==='settings'){$('installationPanel').innerHTML=installationContent();$('remindersPanel').innerHTML=remindersContent();}
     if(view==='goals')document.querySelectorAll('.goal-card').forEach((card,i)=>{const goal=records('goal')[i];if(goal)card.querySelector('.goal-buttons').insertAdjacentHTML('beforebegin',goalSteps(goal.id));});
     renderedKey=key;lastRenderedView=view;
@@ -362,9 +405,12 @@
   }
   function field(label,name,type,value='',extra='',hint='') {return '<label class="field">'+label+'<input name="'+name+'" type="'+type+'" value="'+esc(value)+'" '+extra+'>'+(hint?'<small>'+hint+'</small>':'')+'</label>';}
   function selectField(label,name,options,value='') {return '<label class="field">'+label+'<select name="'+name+'">'+options.map(([id,title])=>'<option value="'+esc(id)+'" '+(id===value?'selected':'')+'>'+esc(title)+'</option>').join('')+'</select></label>';}
-  function openEditor(title,html,save) {
+  function openEditor(title,html,save,mode='') {
     if(busy)return;
     movePreview=null;editorLabel='Сохранить';
+    clearOnboardingPresentation();
+    if(mode==='onboarding'){$('editor').classList.add('onboarding-dialog');$('dialogEyebrow').textContent='ДОБРО ПОЖАЛОВАТЬ В HVF';$('cancelDialog').textContent='Пропустить настройку';}
+    else onboarding=null;
     $('dialogTitle').textContent=title;$('dialogFields').innerHTML=html;$('formError').textContent='';$('saveDialog').disabled=false;$('saveDialog').textContent='Сохранить';submitEditor=save;if(motion)motion.open($('editor'));else $('editor').showModal();
     $('cancelDialog').hidden=false;
   }
@@ -547,7 +593,18 @@
     else if(action==='focus-task')focusEditor(id);
     else if(action==='focus-pause')focus.pause();else if(action==='focus-resume')focus.resume();else if(action==='focus-stop')focus.stop();else if(action==='focus-break')focus.startBreak(Number(id));
     else if(action==='start-onboarding')startOnboarding();
-    else if(action==='skip-onboarding'){store.put({id:'onboarding-preferences',kind:'onboarding-preferences',month:'2000-05',completed:true,version:1,completedAt:new Date().toISOString()});toast('Настройку можно открыть позже в разделе «Настройки».');}
+    else if(action==='billing-refresh')void billing?.refresh();
+    else if(action==='billing-checkout'){
+      if(!state.user){toast('Сначала войди через Google.');return;}
+      if(!billing?.getState().catalog?.paymentsReady){toast('Оплата пока не подключена. Пользуйся бесплатной бетой.');return;}
+      const yearly=id==='yearly';
+      openEditor('Подписка HVF Plus','<p class="preview-intro">'+(yearly?'72 BYN за год':'8 BYN за месяц')+'. Подписка продлевается автоматически. Автопродление можно отключить в разделе тарифов; оплаченный период останется доступен.</p><p class="status-note">На следующем шаге откроется защищённая платёжная страница bePaid. Возвращение с неё само по себе не подтверждает оплату.</p>',async()=>{const target=await billing.checkout(id);location.assign(target);});
+      setEditorLabel('Перейти к оплате');
+    }
+    else if(action==='billing-cancel'){
+      openEditor('Отключить автопродление','<p class="preview-intro">Следующее списание будет отменено. Уже оплаченный доступ сохранится до конца периода.</p>',async()=>{await billing.cancel();toast('Автопродление отключено. Оплаченный период сохранён.');});setEditorLabel('Отключить автопродление');
+    }
+    else if(action==='skip-onboarding')skipOnboarding();
     else if(action==='onboarding-back'&&onboarding){captureOnboarding(new FormData($('editorForm')),false);onboarding.step=Math.max(0,onboarding.step-1);showOnboarding();}
     else if(action==='add-category')categoryEditor();else if(action==='edit-category')categoryEditor(id);else if(action==='archive-category')archiveCategory(id,true);else if(action==='restore-category')archiveCategory(id,false);
     else if(action==='edit-income-plan')incomePlanEditor();
@@ -598,7 +655,7 @@
     event.preventDefault();if(busy||!submitEditor||$('editor').classList.contains('hvf-dialog-exiting'))return;
     const save=submitEditor, data=new FormData(event.target),scope=state.user?.uid||'anonymous',formMonth=month;
     busy=true;$('saveDialog').disabled=true;$('saveDialog').textContent='Сохраняю…';$('formError').textContent='';
-    try{const result=await saveGuarded(save,data,scope,formMonth);if(!result?.keepOpen){if(motion)motion.close($('editor'),{immediate:true});else $('editor').close();movePreview=null;}}catch(error){$('formError').textContent=error.message||'Не удалось сохранить.';}finally{busy=false;$('saveDialog').disabled=!!restoreContext&&!backup.importPlan(allRecords(),restoreContext.parsed,{mode:restoreContext.replace?'replace':'merge'}).records.length;$('saveDialog').textContent=movePreview?'Перенести выбранное':editorLabel;if(!$('editor').open&&pendingReminderDate)openReminderDay(pendingReminderDate);render();}
+    try{const result=await saveGuarded(save,data,scope,formMonth);if(!result?.keepOpen){if(motion)motion.close($('editor'),{immediate:true});else $('editor').close();movePreview=null;clearOnboardingPresentation();}}catch(error){$('formError').textContent=error.message||'Не удалось сохранить.';}finally{busy=false;$('saveDialog').disabled=!!restoreContext&&!backup.importPlan(allRecords(),restoreContext.parsed,{mode:restoreContext.replace?'replace':'merge'}).records.length;$('saveDialog').textContent=movePreview?'Перенести выбранное':editorLabel;if(!$('editor').open&&pendingReminderDate)openReminderDay(pendingReminderDate);render();}
   });
   async function saveGuarded(save,data,scope,formMonth){
     // Reject a stale editor after an account or period change.
@@ -609,10 +666,10 @@
   $('accountButton').addEventListener('click',()=>{if(!busy)void store.signInOut().catch(e=>toast(e.message));});
   function closeEditor(){
     if(busy){toast('Дождись сохранения.');return;}
-    const onClosed=()=>{movePreview=null;onboarding=null;restoreContext=null;if(pendingReminderDate)openReminderDay(pendingReminderDate);};
+    const onClosed=()=>{movePreview=null;onboarding=null;restoreContext=null;clearOnboardingPresentation();if(pendingReminderDate)openReminderDay(pendingReminderDate);};
     if(motion)motion.close($('editor'),{onClosed});else {$('editor').close();onClosed();}
   }
-  $('closeDialog').addEventListener('click',closeEditor);$('cancelDialog').addEventListener('click',closeEditor);
+  $('closeDialog').addEventListener('click',closeEditor);$('cancelDialog').addEventListener('click',()=>onboarding?skipOnboarding():closeEditor());
   $('editor').addEventListener('cancel',e=>{e.preventDefault();if(!busy)closeEditor();});
   $('editor').addEventListener('close',()=>{if(pendingReminderDate&&!busy)openReminderDay(pendingReminderDate);});
   $('editor').addEventListener('click',event=>{if(event.target===$('editor')){const r=$('editor').getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)closeEditor();}});
@@ -626,12 +683,13 @@
   window.addEventListener('hvf-open-reminder',event=>openReminderDay(event.detail?.date));
   window.addEventListener('hvf-pwa-status',()=>{if(view==='settings')$('installationPanel').innerHTML=installationContent();});
   let lastScope=state.user?.uid||'anonymous';
-  store.subscribe(next=>{const nextScope=next.user?.uid||'anonymous';if(lastScope!==nextScope){navigation?.cancel();renderedKey='';lastRenderedView='';pendingReminderDate='';completionFlash=null;onboarding=null;restoreContext=null;if($('editor').open){if(motion)motion.close($('editor'),{immediate:true});else $('editor').close();submitEditor=null;movePreview=null;toast('Аккаунт изменился. Открой форму заново.');}}const changed=lastScope!==nextScope;lastScope=nextScope;state=next;if(changed)focus.setScope(next.user?.uid||null);render();});
+  store.subscribe(next=>{const nextScope=next.user?.uid||'anonymous';if(lastScope!==nextScope){navigation?.cancel();renderedKey='';lastRenderedView='';pendingReminderDate='';completionFlash=null;onboarding=null;restoreContext=null;clearOnboardingPresentation();if($('editor').open){if(motion)motion.close($('editor'),{immediate:true});else $('editor').close();submitEditor=null;movePreview=null;toast('Аккаунт изменился. Открой форму заново.');}}const changed=lastScope!==nextScope;lastScope=nextScope;state=next;if(changed)focus.setScope(next.user?.uid||null);render();if(changed&&billing){billing.setUser(next.user);void billing.refresh();}maybeStartOnboarding();});
 
   reminders?.subscribe(()=>{if(view==='settings')$('remindersPanel').innerHTML=remindersContent();});
   if(reminders)void reminders.init().catch(e=>toast(e.message||'Сервис напоминаний временно недоступен.'));
   focus.setScope(state.user?.uid||null);focus.init();
   focus.subscribe((f,event)=>{if(event.type==='tick'){const face=$('focusTime'),mini=$('focusMiniTime');if(face)face.textContent=focusClock(f.remainingMs);if(mini)mini.textContent=focusClock(f.remainingMs);return;}focusRevision++;if(event.type==='finished')toast(f.mode==='break'?'Перерыв закончился. Можно выбрать следующее дело.':'Время фокуса вышло. Отметь результат в списке дел.');if(view==='focus'||view==='overview'||view==='day')render();});
   navigation?.init();
-  store.setPeriod(month,day);render();void store.init();
+  if(billing){billing.setUser(state.user);billing.subscribe(()=>{if(view==='plans'&&lastRenderedView==='plans')$('membershipContent').innerHTML=membershipContent();});void billing.refresh();}
+  store.setPeriod(month,day);render();void Promise.resolve(store.init()).then(()=>{onboardingReady=true;maybeStartOnboarding();});
 }());

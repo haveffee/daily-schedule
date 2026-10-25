@@ -1,25 +1,22 @@
-name: Deploy HVF assistant
+name: Validate HVF application
 
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: github-pages
-  cancel-in-progress: false
+  group: hvf-validation-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  deploy:
+  validate:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout repository
@@ -40,7 +37,7 @@ jobs:
 
       - name: Check JavaScript and regression tests
         run: |
-          for file in assistant-core.js assistant-forecast.js assistant-categories.js assistant-backup.js assistant-planner.js assistant-weekly.js assistant-navigation.js assistant-motion.js assistant-ui.js assistant-focus.js assistant-limits.js assistant-store.js assistant-extras.js assistant-reminders.js reminders-config.js pwa.js service-worker.js backend/reminders/worker.mjs backend/reminders/scripts/generate-vapid.mjs; do
+          for file in app-config.js assistant-billing.js assistant-core.js assistant-forecast.js assistant-categories.js assistant-backup.js assistant-planner.js assistant-weekly.js assistant-navigation.js assistant-motion.js assistant-ui.js assistant-focus.js assistant-limits.js assistant-store.js assistant-extras.js assistant-reminders.js reminders-config.js pwa.js service-worker.js backend/reminders/worker.mjs backend/reminders/scripts/generate-vapid.mjs backend/billing/worker.mjs backend/app/worker.mjs scripts/build-public.mjs; do
             node --check "$file"
           done
           node --test tests/*.test.cjs
@@ -48,20 +45,13 @@ jobs:
       - name: Validate static application
         run: python generate.py
 
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v6
-
       - name: Prepare public application files
-        run: |
-          mkdir -p _site
-          cp index.html assistant.css assistant-navigation.css assistant-finance.css assistant-planner.css assistant-reminders.css assistant-focus.css assistant-limits.css assistant-update.css assistant-sales.css assistant-motion.css assistant-core.js assistant-forecast.js assistant-categories.js assistant-backup.js assistant-planner.js assistant-weekly.js assistant-navigation.js assistant-motion.js assistant-ui.js assistant-focus.js assistant-limits.js assistant-store.js assistant-extras.js assistant-reminders.js reminders-config.js pwa.js service-worker.js firebase-config.js favicon.svg apple-touch-icon.png icon-192.png icon-512.png manifest.webmanifest _site/
-          cp .nojekyll _site/
+        run: node scripts/build-public.mjs
 
-      - name: Upload site artifact
-        uses: actions/upload-pages-artifact@v5
+      - name: Upload public build for review
+        uses: actions/upload-artifact@v4
         with:
-          path: _site
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
+          name: hvf-public-build
+          path: dist
+          if-no-files-found: error
+          retention-days: 7

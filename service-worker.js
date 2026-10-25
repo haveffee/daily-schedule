@@ -2,16 +2,16 @@
  * Firebase requests, auth callbacks and arbitrary URLs do not. */
 "use strict";
 
-const SHELL_VERSION = "2026-10-25-2";
+const SHELL_VERSION = "2026-10-25-3";
 const SCOPE_URL = new URL("./", self.registration.scope);
 const CACHE_PREFIX = "hvf-shell:" + SCOPE_URL.pathname + ":";
 const CACHE_NAME = CACHE_PREFIX + SHELL_VERSION;
 const SHELL_FILES = [
   "index.html", "assistant.css", "assistant-navigation.css", "assistant-finance.css", "assistant-planner.css", "assistant-reminders.css",
-  "assistant-focus.css", "assistant-limits.css", "assistant-update.css", "assistant-sales.css", "assistant-motion.css", "firebase-config.js",
+  "assistant-focus.css", "assistant-limits.css", "assistant-update.css", "assistant-sales.css", "assistant-membership.css", "assistant-motion.css", "assistant-onboarding.css", "assistant-mobile.css", "app-config.js", "firebase-config.js",
   "assistant-core.js", "assistant-forecast.js", "assistant-categories.js", "assistant-store.js", "assistant-backup.js", "assistant-extras.js", "assistant-focus.js", "assistant-limits.js",
-  "assistant-planner.js", "assistant-weekly.js", "assistant-navigation.js", "assistant-motion.js", "assistant-ui.js", "reminders-config.js", "assistant-reminders.js", "pwa.js", "manifest.webmanifest", "favicon.svg",
-  "icon-192.png", "icon-512.png", "apple-touch-icon.png"
+  "assistant-planner.js", "assistant-weekly.js", "assistant-navigation.js", "assistant-motion.js", "assistant-billing.js", "assistant-ui.js", "reminders-config.js", "assistant-reminders.js", "pwa.js", "manifest.webmanifest", "favicon.svg",
+  "icon-192.png", "icon-512.png", "apple-touch-icon.png", "privacy.html", "terms.html"
 ];
 const SHELL_URLS = new Set(SHELL_FILES.map(file => new URL(file, SCOPE_URL).href));
 const INDEX_URL = new URL("index.html", SCOPE_URL).href;

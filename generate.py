@@ -1,4 +1,4 @@
-"""Проверяет статическое приложение HVF перед публикацией в GitHub Pages.
+"""Проверяет статическое приложение HVF перед публикацией.
 
 Имя сохранено для совместимости со старой командой запуска. Скрипт ничего
 не генерирует и не изменяет: цели, дела и финансы задаёт только пользователь.
@@ -20,7 +20,12 @@ REQUIRED = (
     "assistant-limits.css",
     "assistant-update.css",
     "assistant-sales.css",
+    "assistant-membership.css",
     "assistant-motion.css",
+    "assistant-onboarding.css",
+    "assistant-mobile.css",
+    "app-config.js",
+    "assistant-billing.js",
     "assistant-ui.js",
     "assistant-navigation.js",
     "assistant-motion.js",
@@ -44,6 +49,8 @@ REQUIRED = (
     "icon-192.png",
     "icon-512.png",
     "manifest.webmanifest",
+    "privacy.html",
+    "terms.html",
 )
 
 

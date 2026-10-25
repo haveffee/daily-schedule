@@ -1,0 +1,21 @@
+.membership-intro{padding:25px;border-radius:20px;background:var(--green);color:#fff;margin-bottom:22px}
+.membership-intro h2{font-size:24px;line-height:1.35;margin-bottom:10px}
+.membership-intro p{color:#d2ddc9;font-size:13px;max-width:620px}
+.membership-intro .tag{margin-bottom:15px;background:#ffffff1c;color:#e7f0cb}
+.membership-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-bottom:22px}
+.membership-card{position:relative;display:flex;flex-direction:column;gap:15px;background:#fff;border:1px solid var(--line);padding:25px;border-radius:20px;min-width:0}
+.membership-card.recommended{border-color:#b8c99b;background:#fbfdf6}
+.membership-card h3{font-size:18px}.membership-price{font-size:35px;font-weight:700;line-height:1.25;letter-spacing:-1px}
+.membership-price small{font-size:13px;font-weight:500;letter-spacing:0;color:var(--muted)}
+.membership-card p{font-size:12px;color:var(--muted);line-height:1.7}
+.membership-list{list-style:none;padding:0;margin:0 0 20px;display:grid;gap:12px;font-size:13px;line-height:1.65}
+.membership-list li{display:flex;gap:10px}.membership-list li::before{content:'✓';color:#789258;font-weight:700;flex:none}
+.membership-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.membership-actions .button{white-space:normal}
+.membership-note{font-size:12px;line-height:1.8;color:var(--muted)}
+.membership-account{padding:20px;border:1px solid var(--line);border-radius:16px;margin-top:20px}
+.membership-account h3{font-size:16px;margin-bottom:9px}.membership-account p{font-size:12px;color:var(--muted);line-height:1.8}
+.membership-links{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-top:20px}
+.membership-links a{font-size:12px;text-decoration:underline;text-underline-offset:3px}
+.beta-link{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:var(--green);padding:10px 4px;margin-bottom:10px}
+.beta-link span{padding:2px 8px;background:var(--soft);border-radius:6px;font-size:10px;font-weight:700}
+@media(max-width:800px){.membership-grid{grid-template-columns:minmax(0,1fr)}.membership-intro,.membership-card{padding:21px 18px}.membership-price{font-size:34px}.membership-card p,.membership-note,.membership-account p,.membership-links a{font-size:14px}.membership-list{font-size:15px}.membership-links a{padding:10px 0;min-height:44px}.membership-actions .button{flex:1 1 180px;min-height:44px;font-size:14px}}

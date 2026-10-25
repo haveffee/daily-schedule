@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#244c40">
+  <meta name="description" content="HVF переехал. Сохрани свои данные и продолжи пользоваться помощником по новому адресу.">
+  <meta name="robots" content="noindex">
+  <title>HVF — новый адрес</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <style>
+    :root{color-scheme:light;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#263e34;background:#f7f8f4;line-height:1.65}*{box-sizing:border-box}body{margin:0;padding:40px 20px calc(32px + env(safe-area-inset-bottom,0px))}main{max-width:720px;margin:auto}a{color:#244c40;overflow-wrap:anywhere}h1,h2,p{margin:0}h1{font-size:clamp(30px,6vw,42px);line-height:1.2;letter-spacing:-1.2px;margin:22px 0 16px}h2{font-size:20px;line-height:1.4;margin-bottom:12px}.brand{display:flex;align-items:center;gap:11px;font-size:23px;font-weight:800}.brand img{border-radius:13px}.lead{font-size:18px;color:#65766d;margin-bottom:28px}.panel{padding:25px;background:#fff;border:1px solid #e4e9df;border-radius:22px;margin:20px 0}.panel p+p{margin-top:12px}.steps{margin:0;padding-left:23px}.steps li{padding:6px 0}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:20px}.button{font:inherit;font-size:15px;font-weight:650;display:inline-flex;align-items:center;justify-content:center;text-align:center;min-height:48px;padding:12px 18px;border:1px solid transparent;border-radius:12px;text-decoration:none;color:#fff;background:#244c40;cursor:pointer}.button.secondary{background:#fff;color:#244c40;border-color:#dce4d5}.button:disabled{opacity:.5;cursor:wait}.button:focus-visible,a:focus-visible{outline:3px solid #a2b76c;outline-offset:3px}.status{padding:16px;border-radius:13px;background:#edf2e7}.status strong{display:block;margin-bottom:5px}.muted{color:#718076;font-size:14px}.error{color:#a44135;white-space:pre-wrap;overflow-wrap:anywhere;margin-top:12px}.error:empty{display:none}.notice{padding:15px 17px;background:#f1f4e7;border-radius:13px;font-size:14px;margin-top:18px}.new-address{display:block;font-size:14px;margin-top:12px}.footer{font-size:13px;color:#718076;margin-top:22px}button,a{touch-action:manipulation;-webkit-tap-highlight-color:transparent}@media(max-width:520px){body{padding:calc(24px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}.panel{padding:21px 18px}.lead{font-size:17px}.actions{gap:10px}.actions .button{width:100%;font-size:16px}}
+  </style>
+  <script defer src="./firebase-config.js"></script>
+  <script defer src="./assistant-core.js"></script>
+  <script defer src="./assistant-planner.js"></script>
+  <script defer src="./assistant-store.js"></script>
+  <script defer src="./assistant-backup.js"></script>
+  <script defer src="./reminders-config.js"></script>
+  <script defer src="./legacy-migration.js"></script>
+</head>
+<body>
+  <main>
+    <div class="brand"><img src="./icon-192.png" alt="" width="42" height="42">HVF</div>
+    <h1>Твой помощник переехал.</h1>
+    <p class="lead">Дела, цели и деньги теперь по новому адресу. Сначала сохрани данные со старого адреса, затем продолжи в новом HVF.</p>
+    <section class="panel" aria-labelledby="dataTitle">
+      <h2 id="dataTitle">1. Сохрани свои данные</h2>
+      <div class="status" role="status" aria-live="polite"><strong id="migrationStatus">Подключаем данные…</strong><p id="migrationDetail">Старые записи остаются на этом устройстве.</p></div>
+      <p class="muted" id="migrationAccount"></p>
+      <p class="muted" id="migrationCount"></p>
+      <div class="actions"><button type="button" class="button secondary" id="migrationAuth" disabled>Войти через Google</button><button type="button" class="button secondary" id="migrationExport" disabled>Скачать полную копию</button></div>
+      <p id="migrationError" class="error" role="alert"></p>
+      <p class="notice">Дождись статуса «Всё синхронизировано» для актуальной копии аккаунта. Если связи нет, скачай доступные локальные записи. JSON-копия содержит личные данные — храни её у себя.</p>
+    </section>
+    <section class="panel" aria-labelledby="moveTitle">
+      <h2 id="moveTitle">2. Открой новый HVF</h2>
+      <ol class="steps"><li>На новом адресе войди в тот же Google-аккаунт. Синхронизированные записи появятся после загрузки.</li><li>Если ты пользовался без входа или часть данных осталась локально, открой «Настройки → Восстановить из файла» и выбери скачанную JSON-копию. Сначала увидишь список изменений.</li><li>На iPhone добавь новый адрес на главный экран через меню «Поделиться». В настройках нового HVF заново включи напоминания и проверь доставку.</li></ol>
+      <div class="actions"><a class="button" id="migrationOpen" href="https://hvf-app.haveffee-assistant.workers.dev/" target="_blank" rel="noopener noreferrer">Открыть новый HVF ↗</a></div>
+      <a class="new-address" href="https://hvf-app.haveffee-assistant.workers.dev/" target="_blank" rel="noopener noreferrer">hvf-app.haveffee-assistant.workers.dev</a>
+    </section>
+    <section class="panel" aria-labelledby="reminderTitle">
+      <h2 id="reminderTitle">3. Убери старые напоминания</h2>
+      <p><strong>Сначала получи проверочное уведомление из нового HVF.</strong> После успешной проверки отключи напоминания старого приложения на этом устройстве, чтобы они не приходили дважды.</p>
+      <div class="actions"><button type="button" class="button secondary" id="migrationStopReminders" disabled>Отключить напоминания старого приложения</button></div>
+      <p class="muted">Нужен вход в тот же Google-аккаунт, с которым были подключены старые напоминания. Кнопка отключает только старый адрес на этом устройстве; новый HVF и остальные устройства продолжат работать.</p>
+      <p class="muted" id="migrationReminderStatus" role="status" aria-live="polite"></p>
+    </section>
+    <p class="footer">Адреса сайтов используют отдельные локальные хранилища. Эта страница не удаляет старые записи и не пересылает их через ссылку. Старую иконку приложения можно убрать после проверки данных на новом адресе. Закрой старые вкладки, чтобы обновилась страница переезда.</p>
+    <p class="footer" id="migrationWorker"></p>
+    <noscript><p class="notice">Для входа и скачивания копии включи JavaScript. Новый HVF доступен по ссылке выше; локальные записи остаются на старом адресе.</p></noscript>
+  </main>
+</body>
+</html>

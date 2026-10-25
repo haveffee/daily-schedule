@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { execFileSync } = require('node:child_process');
 
 const root = path.join(__dirname, '..');
 const workerSource = fs.readFileSync(path.join(root, 'service-worker.js'), 'utf8');
@@ -11,6 +12,7 @@ const SCOPE = 'https://example.github.io/daily-schedule/';
 const turn = () => new Promise(resolve => setImmediate(resolve));
 
 function worker(options = {}) {
+  const scope = options.scope || SCOPE;
   const events = new Map();
   const stores = new Map();
   const requests = [];
@@ -43,7 +45,7 @@ function worker(options = {}) {
   };
   const fetchMock = async request => { requests.push(request); return network(request); };
   const self = {
-    registration: { scope: SCOPE, async showNotification(title, settings) { notifications.push({ title, settings }); } },
+    registration: { scope, async showNotification(title, settings) { notifications.push({ title, settings }); } },
     clients: { async claim() { claims++; }, async matchAll() { return options.windows || []; }, async openWindow(url) { opened.push(url); } },
     addEventListener: (name, callback) => events.set(name, callback)
   };
@@ -65,7 +67,7 @@ function worker(options = {}) {
     fetch(url, options = {}) {
       let pending;
       events.get('fetch')({
-        request: { url: new URL(url, SCOPE).href, mode: options.mode || 'cors', method: options.method || 'GET' },
+        request: { url: new URL(url, scope).href, mode: options.mode || 'cors', method: options.method || 'GET' },
         respondWith(value) { pending = value; }
       });
       return pending;
@@ -73,19 +75,28 @@ function worker(options = {}) {
   };
 }
 
-test('manifest keeps installation within the GitHub Pages project path', () => {
+test('relative manifest supports both the old project path and the new root hosting', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.webmanifest'), 'utf8'));
   for (const field of ['id', 'scope', 'start_url']) assert.equal(manifest[field], './');
+  for (const scope of [SCOPE, 'https://hvf.example.workers.dev/']) {
+    for (const field of ['id', 'scope', 'start_url']) assert.equal(new URL(manifest[field], scope).href, scope);
+  }
   assert.equal(manifest.display, 'standalone');
   assert.deepEqual(manifest.icons.map(icon => icon.sizes), ['192x192', '512x512']);
   for (const icon of manifest.icons) assert.ok(fs.existsSync(path.join(root, icon.src)));
+});
+
+test('Cloudflare serves precached HTML paths without canonical redirects that reject service worker installation', () => {
+  const config = JSON.parse(fs.readFileSync(path.join(root, 'backend/app/wrangler.jsonc'), 'utf8'));
+  assert.equal(config.assets.html_handling, 'none');
+  assert.equal(config.assets.directory, '../../dist');
 });
 
 test('installation precaches a complete public shell under the project path only', async () => {
   const sw = worker();
   await sw.lifecycle('install');
   const urls = sw.requests.map(request => request.url);
-  assert.equal(urls.length, 33);
+  assert.equal(urls.length, 40);
   for (const request of sw.requests) {
     assert.ok(request.url.startsWith(SCOPE));
     assert.equal(request.cache, 'reload');
@@ -105,24 +116,55 @@ test('deployment and validation include the same shell and load the new modules 
   await sw.lifecycle('install');
   const expected = sw.requests.map(request => new URL(request.url).pathname.split('/').pop()).concat('service-worker.js').sort();
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/update_schedule.yml'), 'utf8');
-  const copied = workflow.match(/\bcp (index\.html [^\n]+) _site\//)[1].trim().split(/\s+/).sort();
-  assert.deepEqual(copied, expected, 'GitHub Pages artifact includes every public shell file');
+  assert.match(workflow, /run: node scripts\/build-public\.mjs/);
+  assert.doesNotMatch(workflow, /(?:configure|deploy|upload)-pages|pages:\s*write|id-token:\s*write|environment:\s*\n\s*name: github-pages/);
+  assert.match(workflow, /backend\/billing\/worker\.mjs/);
+  assert.match(workflow, /backend\/app\/worker\.mjs/);
+  const build = fs.readFileSync(path.join(root, 'scripts/build-public.mjs'), 'utf8');
+  assert.match(build, /service-worker\.js/);
+  assert.match(build, /JSON\.parse\(match\[1\]\)/, 'public build reads the service worker allowlist');
+  const output = path.join(root, 'dist');
+  fs.mkdirSync(output, { recursive: true });
+  fs.writeFileSync(path.join(output, 'stale-build-check.txt'), 'must not be deployed');
+  execFileSync(process.execPath, [path.join(root, 'scripts/build-public.mjs')], { cwd: root, stdio: 'pipe' });
+  const copied = fs.readdirSync(output).sort();
+  assert.deepEqual(copied, expected.concat('_headers').sort(), 'public build contains only shell files, worker and hosting headers');
+  for (const file of expected) assert.equal(fs.readFileSync(path.join(output, file)).compare(fs.readFileSync(path.join(root, file))), 0, file + ' is copied intact');
   const validator = fs.readFileSync(path.join(root, 'generate.py'), 'utf8');
   const required = [...validator.match(/REQUIRED = \(([\s\S]*?)\)/)[1].matchAll(/"([^"]+)"/g)].map(match => match[1]).sort();
   assert.deepEqual(required, expected, 'local validation covers the deployed files');
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   const ui = html.indexOf('./assistant-ui.js');
   assert.ok(ui > 0);
-  for (const name of ['categories', 'forecast', 'backup', 'focus', 'limits', 'navigation', 'motion']) {
+  for (const name of ['categories', 'forecast', 'backup', 'focus', 'limits', 'navigation', 'motion', 'billing']) {
     const moduleIndex = html.indexOf('./assistant-' + name + '.js');
     assert.ok(moduleIndex > 0 && moduleIndex < ui, name + ' module loads before UI');
     assert.match(workflow, new RegExp('for file in [^\\n]*assistant-' + name + '\\.js'));
   }
   assert.ok(html.indexOf('./assistant-core.js') < html.indexOf('./assistant-forecast.js'), 'forecast uses the already loaded budget core');
   assert.ok(html.indexOf('./assistant-categories.js') < html.indexOf('./assistant-limits.js'), 'custom category limits load their classifier first');
+  assert.ok(html.indexOf('./app-config.js') < html.indexOf('./firebase-config.js'), 'hosting and billing configuration is available before services initialize');
   const stylesheets = [...html.matchAll(/<link\b[^>]*rel="stylesheet"[^>]*href="([^"?]+)(?:\?[^\"]*)?"/g)].map(match => match[1]);
-  assert.equal(stylesheets.at(-1), './assistant-motion.css', 'shared motion rules follow the established component styles');
+  assert.equal(stylesheets.at(-1), './assistant-mobile.css', 'comfortable phone layouts override the older small typography');
+  assert.ok(stylesheets.indexOf('./assistant-membership.css') < stylesheets.indexOf('./assistant-motion.css'));
+  assert.ok(stylesheets.indexOf('./assistant-motion.css') < stylesheets.indexOf('./assistant-onboarding.css'));
+  assert.ok(stylesheets.indexOf('./assistant-onboarding.css') < stylesheets.indexOf('./assistant-mobile.css'));
   for (const source of [html, workerSource, workflow, validator]) assert.doesNotMatch(source, /assistant-(?:ai|quick)\.js/);
+});
+
+test('root hosting keeps offline files, notification icons and reminder routes on the new origin', async () => {
+  const scope = 'https://hvf.example.workers.dev/';
+  const sw = worker({ scope });
+  await sw.lifecycle('install');
+  assert.equal(sw.requests.length, 40);
+  assert.ok(sw.requests.every(request => request.url.startsWith(scope)));
+  sw.setNetwork(async () => { throw new Error('offline'); });
+  assert.match(await (await sw.fetch('./', { mode: 'navigate' })).text(), /online:/);
+  assert.match(await (await sw.fetch('assistant-mobile.css?v=1')).text(), /online:/);
+  await sw.dispatch('push', { data: { json: () => ({ date: '2026-10-25' }) } });
+  assert.equal(sw.notifications[0].settings.icon, scope + 'icon-192.png');
+  await sw.dispatch('notificationclick', { notification: { data: { date: '2026-10-25' }, close() {} } });
+  assert.deepEqual(sw.opened, [scope + '#day/2026-10-25']);
 });
 
 test('a missing shell file rejects installation instead of activating a partial version', async () => {

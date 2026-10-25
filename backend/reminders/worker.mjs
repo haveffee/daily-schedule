@@ -1,7 +1,8 @@
 import planner from '../../assistant-planner.js';
 
-export const APP_ORIGIN = 'https://haveffee.github.io';
-export const APP_URL = APP_ORIGIN + '/daily-schedule/';
+export const APP_ORIGIN = 'https://hvf-app.haveffee-assistant.workers.dev';
+export const LEGACY_ORIGIN = 'https://haveffee.github.io';
+export const APP_URL = APP_ORIGIN + '/';
 export const FIREBASE_PROJECT = 'daily-schedule-sync-fc374';
 export const GOOGLE_JWKS = 'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 export const LIMITS = Object.freeze({ body: 131072, records: 1000, devices: 5, accounts: 20, occurrences: 200, jobs: 1000, claim: 4 });
@@ -341,8 +342,8 @@ export function createWorker(dependencies = {}) {
     const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Vary': 'Origin', 'X-Content-Type-Options': 'nosniff' };
     const respond = (value, status = 200) => new Response(JSON.stringify(value), { status, headers });
     try {
-      if (origin && origin !== APP_ORIGIN) fail(403, 'origin_not_allowed', 'Этот источник не разрешён.');
-      if (origin === APP_ORIGIN) headers['Access-Control-Allow-Origin'] = APP_ORIGIN;
+      if (origin && origin !== APP_ORIGIN && origin !== LEGACY_ORIGIN) fail(403, 'origin_not_allowed', 'Этот источник не разрешён.');
+      if (origin === APP_ORIGIN || origin === LEGACY_ORIGIN) headers['Access-Control-Allow-Origin'] = origin;
       if (request.method === 'OPTIONS') {
         headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS';
         headers['Access-Control-Allow-Headers'] = 'Authorization,Content-Type';

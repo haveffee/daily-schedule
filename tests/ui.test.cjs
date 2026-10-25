@@ -28,9 +28,11 @@ function createUI(initial = [], options = {}) {
   const windowEvents = new Map();
   const nodes = new Map();
   let sequence = 0;
+  let finishInitialization;
+  const initialization=new Promise(resolve=>{finishInitialization=resolve;});
   let current = {
     records: Object.fromEntries(initial.map(record => [record.id, clone(record)])),
-    status: 'local', user: null, error: ''
+    status: options.initialStatus||'local', user: options.initialUser||null, error: ''
   };
   const subscribers = [];
   const periods = [];
@@ -105,7 +107,9 @@ function createUI(initial = [], options = {}) {
     },
     remove(id) { writes.push({ action: 'remove', id }); delete current.records[id]; publish(); },
     setPeriod(month, day) { periods.push({ month, day }); },
-    init: async () => {}, signInOut: async () => {}
+    // Tests that exercise the automatic first visit explicitly finish startup.
+    // Other handler tests stay before authentication initialization completes.
+    init: () => initialization, signInOut: async () => {}
   };
   let currentHash = '#money';
   const location = {
@@ -146,6 +150,7 @@ function createUI(initial = [], options = {}) {
 
   return {
     node, periods, writes, focus, downloads,contentWrites,scrolls,
+    async finishInitialization(){finishInitialization();await initialization;await Promise.resolve();},
     contentWriteCount:()=>contentWrites.length,
     scrollTop:()=>window.scrollY,
     scrollTo(value){window.scrollY=value;},
@@ -164,8 +169,8 @@ function createUI(initial = [], options = {}) {
     upsert(record) { current.records[record.id] = clone(record); publish(); },
     status(status,error=''){current={...current,status,error};publish();},
     publish(){publish();},
-    account(uid, records = []) {
-      current = { ...current, user: uid ? { uid, email: uid + '@example.test' } : null,
+    account(uid, records = [], status=current.status) {
+      current = { ...current, status, user: uid ? { uid, email: uid + '@example.test' } : null,
         records: Object.fromEntries(records.map(record => [record.id, clone(record)])) };
       publish();
     },
@@ -380,7 +385,7 @@ test('first-run wizard reviews three steps and saves linked data only at the end
 test('wizard cancellation and optional fields never generate example records', async () => {
   const ui=createUI();ui.click('start-onboarding');
   await ui.submit({currency:'BYN',salary:'',nextDate:'',expectedAmount:''});
-  await ui.node('cancelDialog').fire('click');assert.equal(ui.writes.length,0);
+  await ui.node('closeDialog').fire('click');assert.equal(ui.writes.length,0);
   ui.click('start-onboarding');
   await ui.submit({currency:'USD',salary:'',nextDate:'',expectedAmount:''});
   await ui.submit({goalTitle:'',outcome:''});
@@ -397,6 +402,96 @@ test('wizard validates amounts, dates and rhythm before any data is written', as
   await ui.submit({goalTitle:'Цель',outcome:''});
   await ui.submit({taskTitle:'Дело',duration:'30',start:'20:00',end:'09:00'},/Конец дня/);
   assert.equal(ui.writes.length,0);ui.account('other');assert.equal(ui.node('editor').open,false);
+});
+
+test('an empty first visit automatically opens the full-screen setup after startup without writing examples', async () => {
+  const ui=createUI();
+  assert.equal(ui.node('editor').open,false,'wait for authentication initialization');
+  await ui.finishInitialization();
+  assert.equal(ui.node('editor').open,true);
+  assert.equal(ui.node('editor').classList.contains('onboarding-dialog'),true);
+  assert.match(ui.node('dialogTitle').textContent,/шаг 1 из 3/);
+  assert.match(ui.fields(),/data-action="skip-onboarding"/);
+  assert.equal(ui.node('cancelDialog').textContent,'Пропустить настройку');
+  assert.equal(ui.records().length,0);assert.equal(ui.writes.length,0);
+  ui.publish();ui.status('syncing');
+  assert.match(ui.node('dialogTitle').textContent,/шаг 1 из 3/,'status updates do not restart the setup');
+});
+
+test('setup skip is available at each step and only saves the explicit dismissal marker', async () => {
+  for(let step=0;step<3;step++){
+    const ui=createUI();await ui.finishInitialization();
+    if(step>0)await ui.submit({currency:'BYN',salary:'900',nextDate:'',expectedAmount:''});
+    if(step>1)await ui.submit({goalTitle:'Не сохранять черновик',outcome:'Только после подтверждения'});
+    assert.match(ui.fields(),/data-action="skip-onboarding"/,'top skip on step '+(step+1));
+    assert.equal(ui.writes.length,0);
+    if(step===1)await ui.node('cancelDialog').fire('click');else ui.click('skip-onboarding');
+    assert.equal(ui.node('editor').open,false);
+    assert.equal(ui.node('editor').classList.contains('onboarding-dialog'),false);
+    assert.equal(ui.records().length,1);
+    const [marker]=ui.records('onboarding-preferences');
+    assert.equal(marker.completed,true);assert.equal(marker.skipped,true);
+    assert.equal(backup.parse(JSON.stringify(backup.create([marker]))).ok,true,'skip marker stays compatible with full backups');
+    ui.publish();ui.status('synced');assert.equal(ui.node('editor').open,false);
+    const revisited=createUI(ui.records());await revisited.finishInitialization();
+    assert.equal(revisited.node('editor').open,false,'dismissal survives another visit');
+  }
+});
+
+test('closing setup without saving stays closed for this scope while settings can reopen it', async () => {
+  const ui=createUI();await ui.finishInitialization();
+  await ui.node('closeDialog').fire('click');
+  assert.equal(ui.node('editor').open,false);assert.equal(ui.writes.length,0);
+  ui.publish();ui.status('synced');assert.equal(ui.node('editor').open,false);
+  ui.navigate('#settings');ui.click('start-onboarding');
+  assert.equal(ui.node('editor').open,true);assert.equal(ui.node('editor').classList.contains('onboarding-dialog'),true);
+  assert.match(ui.node('dialogTitle').textContent,/шаг 1 из 3/);
+  ui.click('skip-onboarding');ui.click('add-task');
+  assert.equal(ui.node('editor').classList.contains('onboarding-dialog'),false,'ordinary forms leave the full-screen mode');
+  assert.equal(ui.node('cancelDialog').textContent,'Отмена');
+});
+
+test('existing personal data and completed or skipped setup are never forced into onboarding', async () => {
+  const examples=[
+    [dayTask('already-used')],
+    [{id:'settings-'+MONTH,kind:'settings',month:MONTH,start:'10:00',end:'18:00',breakMinutes:5}],
+    [{id:'expense',kind:'expense',month:MONTH,title:'Проезд',amount:3,currency:'BYN',date:DAY}],
+    [{id:'onboarding-preferences',kind:'onboarding-preferences',month:'2000-05',completed:true,version:1}],
+    [{id:'onboarding-preferences',kind:'onboarding-preferences',month:'2000-05',completed:true,skipped:true,version:1}]
+  ];
+  for(const records of examples){
+    const ui=createUI(records);await ui.finishInitialization();
+    assert.equal(ui.node('editor').open,false,records[0].kind);
+    assert.equal(ui.writes.length,0);
+    ui.navigate('#settings');ui.click('start-onboarding');assert.equal(ui.node('editor').open,true,'manual setup remains available');
+  }
+});
+
+test('first-run help waits for the account data and never flashes anonymous help before sign-in restores', async () => {
+  const ui=createUI();
+  ui.account('returning',[dayTask('cloud-task')],'loading');
+  await ui.finishInitialization();assert.equal(ui.node('editor').open,false);
+  ui.status('synced');assert.equal(ui.node('editor').open,false,'existing cloud data suppresses setup');
+  ui.account('new-account',[],'loading');assert.equal(ui.node('editor').open,false);
+  ui.status('synced');assert.equal(ui.node('editor').open,true,'new account opens after its data arrives');
+  await ui.submit({currency:'BYN',salary:'300',nextDate:'',expectedAmount:''});
+  ui.account('other-account',[],'loading');
+  assert.equal(ui.node('editor').open,false);assert.equal(ui.node('editor').classList.contains('onboarding-dialog'),false);
+  assert.equal(ui.writes.length,0,'changing accounts never saves another account’s wizard draft');
+  ui.status('synced');assert.match(ui.node('dialogTitle').textContent,/шаг 1 из 3/);
+  ui.click('skip-onboarding');
+  assert.equal(ui.records().length,1);assert.equal(ui.records('onboarding-preferences')[0].skipped,true);
+  ui.account('new-account',[],'loading');ui.status('synced');assert.equal(ui.node('editor').open,false,'a cancelled scope is not reopened repeatedly this session');
+});
+
+test('an empty cached account snapshot is not mistaken for a new account before cloud data arrives', async () => {
+  const ui=createUI([],{initialStatus:'loading',initialUser:{uid:'returning',email:'returning@example.test'}});
+  await ui.finishInitialization();ui.status('offline');
+  assert.equal(ui.node('editor').open,false,'an empty cache is not proof of an empty account');
+  ui.upsert(dayTask('from-cloud'));ui.status('synced');
+  assert.equal(ui.node('editor').open,false);assert.equal(ui.writes.length,0);
+  ui.account('new',[],'offline');assert.equal(ui.node('editor').open,false);
+  ui.status('synced');assert.equal(ui.node('editor').open,true);
 });
 
 const settleUI=async()=>{for(let i=0;i<4;i++)await new Promise(resolve=>setImmediate(resolve));};
@@ -727,7 +822,8 @@ test('settings installation panel uses the permanent public link and explains de
   const ui = createUI();
   ui.navigate('#settings');
   const installation = ui.node('installationPanel').innerHTML;
-  assert.match(installation, /href="https:\/\/haveffee\.github\.io\/daily-schedule\/"/);
+  assert.match(installation, /href="https:\/\/hvf-app\.haveffee-assistant\.workers\.dev\/"/);
+  assert.match(installation, /размещается на Cloudflare/);
   assert.doesNotMatch(installation, /localhost|127\.0\.0\.1/);
   assert.match(installation, /Компьютер можно выключать/);
   assert.match(installation, /синхронизация работает через Firebase/);

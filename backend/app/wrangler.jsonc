@@ -1,0 +1,25 @@
+{
+  "$schema": "../reminders/node_modules/wrangler/config-schema.json",
+  "name": "hvf-app",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-25",
+  "workers_dev": true,
+  "observability": { "enabled": false },
+  "assets": {
+    "directory": "../../dist",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "run_worker_first": ["/", "/api/*", "/__/auth/*", "/health"]
+  },
+  "vars": {
+    "APP_URL": "https://hvf-app.haveffee-assistant.workers.dev/",
+    "BILLING_MODE": "disabled",
+    "BILLING_MERCHANT_APPROVED": "false"
+  },
+  "d1_databases": [{
+    "binding": "BILLING_DB",
+    "database_name": "hvf-billing",
+    "database_id": "957ad0ed-5f69-4f94-962d-d43aec6704ea",
+    "migrations_dir": "../billing/migrations"
+  }]
+}

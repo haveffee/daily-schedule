@@ -20,7 +20,11 @@
   <link rel="stylesheet" href="./assistant-limits.css?v=1">
   <link rel="stylesheet" href="./assistant-update.css?v=2">
   <link rel="stylesheet" href="./assistant-sales.css?v=3">
+  <link rel="stylesheet" href="./assistant-membership.css?v=1">
   <link rel="stylesheet" href="./assistant-motion.css?v=1">
+  <link rel="stylesheet" href="./assistant-onboarding.css?v=1">
+  <link rel="stylesheet" href="./assistant-mobile.css?v=1">
+  <script defer src="./app-config.js?v=1"></script>
   <script defer src="./firebase-config.js"></script>
   <script defer src="./assistant-core.js?v=4"></script>
   <script defer src="./assistant-forecast.js?v=1"></script>
@@ -37,7 +41,8 @@
   <script defer src="./assistant-limits.js?v=2"></script>
   <script defer src="./assistant-navigation.js?v=2"></script>
   <script defer src="./assistant-motion.js?v=1"></script>
-  <script defer src="./assistant-ui.js?v=11"></script>
+  <script defer src="./assistant-billing.js?v=1"></script>
+  <script defer src="./assistant-ui.js?v=12"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">К содержимому</a>
@@ -51,12 +56,12 @@
       <a href="#money" data-view="money"><span data-icon="wallet"></span><span>Финансы</span></a>
       <a href="#settings" data-view="settings"><span data-icon="settings"></span><span>Настройки</span></a>
     </nav>
-    <div class="sidebar-bottom"><div class="sync-indicator"><i id="syncDot"></i><span id="syncShort">На этом устройстве</span></div><p id="syncDetail">Войди в Google на телефоне и компьютере, чтобы всё было рядом.</p><button id="accountButton" class="button secondary full" type="button">Войти через Google</button><small id="accountEmail"></small></div>
+    <div class="sidebar-bottom"><a class="beta-link" href="#plans">HVF Plus <span>Бета</span></a><div class="sync-indicator"><i id="syncDot"></i><span id="syncShort">На этом устройстве</span></div><p id="syncDetail">Войди в Google на телефоне и компьютере, чтобы всё было рядом.</p><button id="accountButton" class="button secondary full" type="button">Войти через Google</button><small id="accountEmail"></small></div>
   </aside>
   <div class="workspace">
     <header class="topbar"><span class="topbar-title">Твоё личное пространство</span><div class="topbar-controls"><span class="timezone">Минск · UTC+3</span><label class="month-picker"><span class="sr-only">Выбрать месяц</span><input type="month" id="monthPicker" required></label><a class="avatar" id="syncBadge" href="#settings" aria-label="Настройки и синхронизация">H</a></div></header>
     <main id="main" tabindex="-1"><div id="content"></div></main>
-    <footer>HVF <span>·</span> Место для твоих планов</footer>
+    <footer>HVF <span>·</span> Место для твоих планов <span>·</span> <a href="./privacy.html">Конфиденциальность</a> <span>·</span> <a href="./terms.html">Условия</a></footer>
   </div>
   <dialog id="editor" aria-labelledby="dialogTitle"><form id="editorForm"><header class="dialog-head"><div><p class="eyebrow" id="dialogEyebrow">ЛИЧНЫЙ ПОМОЩНИК</p><h2 id="dialogTitle"></h2></div><button type="button" class="icon-button" id="closeDialog" aria-label="Закрыть">×</button></header><div id="dialogFields"></div><p id="formError" class="error" role="alert"></p><div class="dialog-actions"><button type="button" class="button secondary" id="cancelDialog">Отмена</button><button type="submit" class="button" id="saveDialog">Сохранить</button></div></form></dialog>
   <div class="toast" id="toast" role="status" hidden><span id="toastText"></span><button id="undoButton" type="button" hidden>Вернуть</button><button id="closeToast" type="button" aria-label="Закрыть уведомление">×</button></div>

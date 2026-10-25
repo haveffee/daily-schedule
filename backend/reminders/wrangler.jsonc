@@ -14,7 +14,7 @@
   },
   "vars": {
     "VAPID_PUBLIC_KEY": "BI8A5fxPUcxsytEhXD19CQAqrWc5FDvBIL9YEkeySb0Fy4p2PBYFP-mz4LR5OURBxBqIAO_t56eaCGEFRig_-zg",
-    "VAPID_SUBJECT": "https://haveffee.github.io/daily-schedule/"
+    "VAPID_SUBJECT": "https://hvf-app.haveffee-assistant.workers.dev/"
   },
   "d1_databases": [
     {
