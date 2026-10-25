@@ -6,6 +6,7 @@
 
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 ROOT = Path(__file__).resolve().parent
@@ -46,6 +47,7 @@ REQUIRED = (
     "firebase-config.js",
     "favicon.svg",
     "apple-touch-icon.png",
+    "apple-touch-icon-v2.png",
     "icon-192.png",
     "icon-512.png",
     "manifest.webmanifest",
@@ -61,7 +63,7 @@ def main() -> None:
 
     manifest = json.loads((ROOT / "manifest.webmanifest").read_text(encoding="utf-8"))
     for icon in manifest.get("icons", []):
-        if not (ROOT / icon["src"]).is_file():
+        if not (ROOT / urlsplit(icon["src"]).path).is_file():
             raise SystemExit("Missing manifest icon: " + icon["src"])
 
     print("HVF static application validated. No user data or HTML was modified.")

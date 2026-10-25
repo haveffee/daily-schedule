@@ -4,12 +4,46 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { execFileSync } = require('node:child_process');
+const { inflateSync } = require('node:zlib');
 
 const root = path.join(__dirname, '..');
 const workerSource = fs.readFileSync(path.join(root, 'service-worker.js'), 'utf8');
 const pwaSource = fs.readFileSync(path.join(root, 'pwa.js'), 'utf8');
 const SCOPE = 'https://example.github.io/daily-schedule/';
 const turn = () => new Promise(resolve => setImmediate(resolve));
+
+// Decode our non-interlaced RGB export using only Node built-ins. Checking the
+// actual pixels catches an empty fallback image as well as transparent corners.
+function readIconPng(file) {
+  const png=fs.readFileSync(path.join(root,file));
+  assert.deepEqual(png.subarray(0,8),Buffer.from([137,80,78,71,13,10,26,10]),file+' is a PNG');
+  const chunks=[];let header,transparency=false;
+  for(let offset=8;offset<png.length;){
+    const length=png.readUInt32BE(offset),type=png.toString('ascii',offset+4,offset+8),data=png.subarray(offset+8,offset+8+length);
+    if(type==='IHDR')header=data;
+    if(type==='IDAT')chunks.push(data);
+    if(type==='tRNS')transparency=true;
+    offset+=length+12;
+  }
+  assert.ok(header,file+' has image dimensions');
+  const width=header.readUInt32BE(0),height=header.readUInt32BE(4);
+  assert.equal(header[8],8,file+' uses 8-bit color');
+  assert.equal(header[9],2,file+' uses opaque RGB with no alpha channel');
+  assert.equal(header[12],0,file+' is not interlaced');
+  assert.equal(transparency,false,file+' has no transparent color key');
+  const channels=3,stride=width*channels,raw=inflateSync(Buffer.concat(chunks)),pixels=Buffer.alloc(stride*height);
+  assert.equal(raw.length,(stride+1)*height,file+' contains every scanline');
+  const paeth=(a,b,c)=>{const p=a+b-c,pa=Math.abs(p-a),pb=Math.abs(p-b),pc=Math.abs(p-c);return pa<=pb&&pa<=pc?a:pb<=pc?b:c;};
+  for(let y=0;y<height;y++){
+    const filter=raw[y*(stride+1)];assert.ok(filter<=4,file+' uses a standard PNG filter');
+    for(let x=0;x<stride;x++){
+      const index=y*stride+x,left=x>=channels?pixels[index-channels]:0,up=y?pixels[index-stride]:0,upperLeft=y&&x>=channels?pixels[index-stride-channels]:0;
+      const prediction=filter===1?left:filter===2?up:filter===3?Math.floor((left+up)/2):filter===4?paeth(left,up,upperLeft):0;
+      pixels[index]=(raw[y*(stride+1)+1+x]+prediction)&255;
+    }
+  }
+  return {width,height,pixels,pixel:(x,y)=>[...pixels.subarray((y*width+x)*channels,(y*width+x)*channels+channels)]};
+}
 
 function worker(options = {}) {
   const scope = options.scope || SCOPE;
@@ -83,7 +117,26 @@ test('relative manifest supports both the old project path and the new root host
   }
   assert.equal(manifest.display, 'standalone');
   assert.deepEqual(manifest.icons.map(icon => icon.sizes), ['192x192', '512x512']);
-  for (const icon of manifest.icons) assert.ok(fs.existsSync(path.join(root, icon.src)));
+  for (const icon of manifest.icons) {
+    assert.equal(new URL(icon.src,SCOPE).search,'?v=2');
+    assert.ok(fs.existsSync(path.join(root,new URL(icon.src,SCOPE).pathname.split('/').pop())));
+  }
+});
+
+test('iPhone gets an explicit fresh 180px PNG and every install icon is an opaque branded square',()=>{
+  const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
+  const link=html.match(/<link\b[^>]*rel="apple-touch-icon"[^>]*>/)?.[0];
+  assert.ok(link,'an iOS touch icon is declared');
+  assert.match(link,/href="\.\/apple-touch-icon-v2\.png"/);
+  assert.match(link,/sizes="180x180"/);assert.match(link,/type="image\/png"/);
+  for(const [file,size] of [['apple-touch-icon-v2.png',180],['apple-touch-icon.png',180],['icon-192.png',192],['icon-512.png',512]]){
+    const icon=readIconPng(file);assert.equal(icon.width,size);assert.equal(icon.height,size);
+    for(const [x,y] of [[0,0],[size-1,0],[0,size-1],[size-1,size-1]])assert.deepEqual(icon.pixel(x,y),[24,61,54],file+' has a solid green square corner');
+    let creamPixels=0;
+    for(let i=0;i<icon.pixels.length;i+=3)if(icon.pixels[i]===242&&icon.pixels[i+1]===239&&icon.pixels[i+2]===223)creamPixels++;
+    assert.ok(creamPixels>size*size*.15,file+' visibly contains the cream assistant logo');
+  }
+  assert.equal(fs.readFileSync(path.join(root,'apple-touch-icon.png')).compare(fs.readFileSync(path.join(root,'apple-touch-icon-v2.png'))),0,'the conventional fallback matches the fresh iOS icon');
 });
 
 test('Cloudflare serves precached HTML paths without canonical redirects that reject service worker installation', () => {
@@ -96,7 +149,7 @@ test('installation precaches a complete public shell under the project path only
   const sw = worker();
   await sw.lifecycle('install');
   const urls = sw.requests.map(request => request.url);
-  assert.equal(urls.length, 40);
+  assert.equal(urls.length, 41);
   for (const request of sw.requests) {
     assert.ok(request.url.startsWith(SCOPE));
     assert.equal(request.cache, 'reload');
@@ -156,11 +209,13 @@ test('root hosting keeps offline files, notification icons and reminder routes o
   const scope = 'https://hvf.example.workers.dev/';
   const sw = worker({ scope });
   await sw.lifecycle('install');
-  assert.equal(sw.requests.length, 40);
+  assert.equal(sw.requests.length, 41);
   assert.ok(sw.requests.every(request => request.url.startsWith(scope)));
   sw.setNetwork(async () => { throw new Error('offline'); });
   assert.match(await (await sw.fetch('./', { mode: 'navigate' })).text(), /online:/);
   assert.match(await (await sw.fetch('assistant-mobile.css?v=1')).text(), /online:/);
+  assert.match(await (await sw.fetch('apple-touch-icon-v2.png')).text(), /online:/);
+  assert.match(await (await sw.fetch('icon-192.png?v=2')).text(), /online:/);
   await sw.dispatch('push', { data: { json: () => ({ date: '2026-10-25' }) } });
   assert.equal(sw.notifications[0].settings.icon, scope + 'icon-192.png');
   await sw.dispatch('notificationclick', { notification: { data: { date: '2026-10-25' }, close() {} } });

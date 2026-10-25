@@ -42,3 +42,4 @@ dialog[open] #dialogFields>.field,dialog[open] #dialogFields>.field-row,dialog[o
 @keyframes hvf-task-complete{0%,100%{background-color:transparent}30%{background-color:#e3edda}}
 @keyframes hvf-check-complete{0%,100%{transform:scale(1)}40%{transform:scale(1.12)}}
 @media(prefers-reduced-motion:reduce){dialog[open] #dialogFields>.field,dialog[open] #dialogFields>.field-row,dialog[open] #dialogFields>.weekday-field,.task-row.just-completed,.task-row.just-completed input:checked{animation:none!important}.task-row.just-completed input:checked{transform:none}}
+.avatar img{display:block;width:100%;height:100%;object-fit:cover;border-radius:inherit}
